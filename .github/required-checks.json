@@ -1,0 +1,9 @@
+{
+  "jobs": [
+    "leak-scan",
+    "denylist",
+    "removed-paths",
+    "release-note",
+    "schema-loosening"
+  ]
+}

@@ -1,0 +1,53 @@
+name: checks
+# Calls practice-library/.github's reusable workflows at one pinned commit. The gate's needs must
+# equal the jobs in .github/required-checks.json.
+# discover and schema-check join when this repository has a check.json to validate.
+on:
+  pull_request:
+    branches: [main]
+    # labeled and unlabeled re-run schema-loosening when a maintainer adds or removes its label.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  leak-scan:
+    uses: practice-library/.github/.github/workflows/leak-scan.yml@1dd90884cca4277db278eb7d4ea17eaebf21e563 # v2.1.0
+  denylist:
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: practice-library/.github/.github/workflows/guard.yml@1dd90884cca4277db278eb7d4ea17eaebf21e563 # v2.1.0
+    with:
+      guard: denylist
+  removed-paths:
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: practice-library/.github/.github/workflows/guard.yml@1dd90884cca4277db278eb7d4ea17eaebf21e563 # v2.1.0
+    with:
+      guard: removed-paths
+  release-note:
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: practice-library/.github/.github/workflows/guard.yml@1dd90884cca4277db278eb7d4ea17eaebf21e563 # v2.1.0
+    with:
+      guard: release-note
+  schema-loosening:
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: practice-library/.github/.github/workflows/guard.yml@1dd90884cca4277db278eb7d4ea17eaebf21e563 # v2.1.0
+    with:
+      guard: schema-loosening
+  gate:
+    if: always()
+    needs: [leak-scan, denylist, removed-paths, release-note, schema-loosening]
+    uses: practice-library/.github/.github/workflows/gate.yml@1dd90884cca4277db278eb7d4ea17eaebf21e563 # v2.1.0
+    with:
+      needs: ${{ toJSON(needs) }}
