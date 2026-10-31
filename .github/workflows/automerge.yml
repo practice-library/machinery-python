@@ -1,0 +1,15 @@
+name: automerge
+# pull_request_target runs this file as it is on the default branch, never the pull request's copy.
+# The allowlist is .github/automerge-paths.json on the base commit.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
+    branches: [main]
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  automerge:
+    uses: practice-library/.github/.github/workflows/automerge.yml@1dd90884cca4277db278eb7d4ea17eaebf21e563 # v2.1.0
+    with:
+      trusted-authors: '["practice-library[bot]"]'
