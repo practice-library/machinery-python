@@ -265,10 +265,20 @@ class Server(unittest.TestCase):
                 self.assertEqual((status, err["code"]), (400, "invalid_argument"))
 
     def test_the_largest_integer_a_double_holds_is_accepted(self):
+        # 2**1024 - 2**970 is the midpoint between the largest double and 2**1024: below it a literal rounds to the
+        # largest double, which is finite; from it on it rounds to infinity (#9)
+        edge = 2 ** 1024 - 2 ** 970
         self.assertEqual(codec.strict_load(b'{"a": %d}' % (2 ** 1023)), {"a": 2 ** 1023})
         self.plugin.answer = Answer({})
-        self.assertEqual(self.post("Plan", b'{"caps": {"timeSeconds": 60, "outputBytes": 1048576}, "input": {"a": %d}}'
-                                   % int(1.7976931348623157e308))[0], 200)
+        for n in (int(1.7976931348623157e308), edge - 1, -(edge - 1)):
+            with self.subTest(n=n):
+                self.assertEqual(self.post("Plan", b'{"caps": {"timeSeconds": 60, "outputBytes": 1048576}, "input": {"a": %d}}'
+                                           % n)[0], 200)
+        for n in (edge, -edge):
+            with self.subTest(n=n):
+                status, _, raw = self.post("Plan", b'{"caps": {"timeSeconds": 60, "outputBytes": 1048576}, "input": {"a": %d}}'
+                                           % n)
+                self.assertEqual((status, self.failure_of(raw)[0]["code"]), (400, "invalid_argument"))
 
     def test_a_decoding_error_is_fitted_to_exactly_the_smallest_legal_output_bytes(self):
         from unittest import mock
