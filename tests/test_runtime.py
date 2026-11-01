@@ -198,6 +198,10 @@ class Server(unittest.TestCase):
         self.assertEqual(json.loads(failure.to_json()), {"data": None, "notRead": [{"what": "x", "why": "y"}],
                                                          "warnings": ["later", "really"]})
 
+    # the HTTP status Connect answers for each code the runtime uses: a test checks it before it decodes the Failure,
+    # so a runtime that answers a success, or another error, fails on the status and not with KeyError (#15)
+    STATUS = {"invalid_argument": 400, "internal": 500, "unimplemented": 501, "deadline_exceeded": 504}
+
     def failure_of(self, body):
         err = json.loads(body)
         [detail] = err["details"]
@@ -236,7 +240,8 @@ class Server(unittest.TestCase):
         for key in ("k" * 2000, "\U0001F600" * 600):
             body = json.dumps({"caps": {"timeSeconds": 60, "outputBytes": 1024}, key: 1}).encode()
             with self.subTest(key=key[:3]):
-                _, _, raw = self.post("Describe", body)
+                status, _, raw = self.post("Describe", body)
+                self.assertEqual(status, 400)
                 self.assertLessEqual(len(raw), 1024)
                 err, _ = self.failure_of(raw)
                 self.assertEqual(err["code"], "invalid_argument")
@@ -293,7 +298,8 @@ class Server(unittest.TestCase):
         self.assertEqual(built.call_args.kwargs["cap"], 1024)
 
     def test_a_refusal_whose_not_read_is_not_a_pair_is_internal_with_its_failure(self):
-        _, _, raw = self.plan(lambda i, c: (_ for _ in ()).throw(Refusal("unavailable", ["w"], not_read=[("x",)])))
+        status, _, raw = self.plan(lambda i, c: (_ for _ in ()).throw(Refusal("unavailable", ["w"], not_read=[("x",)])))
+        self.assertEqual(status, 500)
         self.assertEqual(self.failure_of(raw)[0]["code"], "internal")
 
     def test_every_error_the_runtime_answers_carries_a_failure(self):
@@ -306,12 +312,15 @@ class Server(unittest.TestCase):
                  ("Describe", b"", {}, "invalid_argument")]
         for call, body, headers, code in cases:
             with self.subTest(call=call, body=body):
-                _, _, raw = self.post(call, body, headers)
+                status, _, raw = self.post(call, body, headers)
+                self.assertEqual(status, self.STATUS[code])
                 err, env = self.failure_of(raw)
                 self.assertEqual((err["code"], env.get("data", None)), (code, None))
         for answer in ({"not": "an Answer"}, lambda i, c: 1 / 0):
             with self.subTest(answer=answer):
-                self.assertEqual(self.failure_of(self.plan(answer)[2])[0]["code"], "internal")
+                status, _, raw = self.plan(answer)
+                self.assertEqual(status, 500)
+                self.assertEqual(self.failure_of(raw)[0]["code"], "internal")
 
     def test_the_plugin_gets_integral_numbers_as_integers(self):
         self.plugin.answer = Answer({})
