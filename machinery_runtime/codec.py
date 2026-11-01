@@ -29,14 +29,22 @@ def _pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
     return dict(items)
 
 
-def _constant(name: str) -> None:
-    raise ValueError(f"{name} is not JSON")
+def _integer(text: str) -> int:
+    """An integer literal, refused when it does not fit a double: Struct and Value hold doubles, so a longer
+    one (more than 309 digits) would become infinity inside protobuf-py instead of being refused here."""
+    value = int(text)
+    try:
+        float(value)
+    except OverflowError:
+        raise ValueError("an integer too large for a double") from None
+    return value
 
 
 def strict_load(data: bytes | bytearray) -> Any:
-    """The body's JSON value; ValueError unless it is strict JSON."""
-    value = json.loads(bytes(data).decode("utf-8"), object_pairs_hook=_pairs, parse_constant=_constant)
-    json.dumps(value, ensure_ascii=False).encode("utf-8")  # a lone surrogate cannot be UTF-8
+    """The body's JSON value; ValueError unless it is strict JSON with every number a finite double."""
+    value = json.loads(bytes(data).decode("utf-8"), object_pairs_hook=_pairs, parse_int=_integer)
+    # a lone surrogate cannot be UTF-8; NaN, Infinity and a number that overflows a double (1e400) are refused
+    json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")
     return value
 
 
