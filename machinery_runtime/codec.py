@@ -16,6 +16,8 @@ from typing import Any
 
 from protobuf import Message
 
+from . import failure
+
 ENVELOPE_FIELDS = ("ok", "data", "notRead", "warnings")
 MAX_EXACT = 2 ** 53
 
@@ -69,5 +71,10 @@ class StrictJSONCodec:
         return envelope_json(message)
 
     def decode(self, data: bytes | bytearray, message_class: type[Message]) -> Message:
-        strict_load(data)
-        return message_class.from_json(bytes(data), ignore_unknown_fields=False)
+        """The request, or invalid_argument with a Failure detail: a decoding error is the runtime's answer
+        too. Its size is not fitted, since caps.outputBytes is in the body that did not decode."""
+        try:
+            strict_load(data)
+            return message_class.from_json(bytes(data), ignore_unknown_fields=False)
+        except Exception as e:  # noqa: BLE001 # protobuf-py raises several types
+            raise failure.error("invalid_argument", [f"the body is not a valid {message_class.__name__}: {e}"]) from e

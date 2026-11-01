@@ -2,19 +2,20 @@
 
 Per call, the runtime and not the plugin:
   - decodes strictly (codec.py) and checks the rules proto cannot state (rules.py): invalid_argument;
-  - answers 404 for a path it does not serve (Connect clients read it as unimplemented), 415 for a body
-    that is not application/json, and unimplemented for a call the plugin has no method for;
-  - calls the plugin with plain JSON values, and gives up after caps.timeSeconds or Connect-Timeout-Ms,
-    whichever is sooner: deadline_exceeded (the plugin's thread is left to finish on its own);
+  - answers unimplemented for a call the plugin has no method for;
+  - calls the plugin with plain JSON values (integral numbers as integers, as on the way out), and gives up
+    after caps.timeSeconds or Connect-Timeout-Ms, whichever is sooner: deadline_exceeded (the plugin's
+    thread is left to finish on its own);
   - writes the answer with every envelope field and integral numbers as integers, and refuses one larger
     than caps.outputBytes: resource_exhausted;
-  - turns a Refusal into its Connect code, with the warnings joined by "; " as the message and the envelope
-    (ok false, data null) as a machinery.plugin.v1alpha1.Failure detail. Any error body fits
-    caps.outputBytes: the detail is dropped first, then the message.
+  - turns a Refusal into its Connect code, and a plugin bug into internal.
+Every one of these errors carries its Failure detail and fits caps.outputBytes (failure.py). What connectrpc
+answers before the runtime runs has no detail, as a transport's answer: 404 for a path not served (Connect
+clients read it as unimplemented), 415 for a body that is not application/json, and Connect errors for a
+request over 16 MiB, a Content-Encoding, or a Connect-Timeout-Ms that is not a number.
 """
 from __future__ import annotations
 
-import base64
 import json
 import socketserver
 import sys
@@ -23,77 +24,53 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 from wsgiref.simple_server import WSGIRequestHandler, WSGIServer
 
-from connectrpc.code import Code
-from connectrpc.errors import ConnectError, ErrorDetail
 from machinery.plugin.v1alpha1 import plugin_pb as pb
 from machinery.plugin.v1alpha1.plugin_connect import PluginServiceWSGIApplication
-from protobuf.wkt.google.protobuf.any_pb import Any as AnyMessage
 
-from . import codec, rules
+from . import codec, failure, rules
 
 PACKAGE = "machinery.plugin.v1alpha1"
 MAX_REQUEST_BYTES = 16 << 20
-CODES = {"invalid_argument": Code.INVALID_ARGUMENT, "failed_precondition": Code.FAILED_PRECONDITION,
-         "resource_exhausted": Code.RESOURCE_EXHAUSTED, "unimplemented": Code.UNIMPLEMENTED,
-         "unavailable": Code.UNAVAILABLE}
+CODES = {k: v for k, v in failure.CODES.items() if k not in ("deadline_exceeded", "internal")}  # a Refusal's
 # call: (the plugin's method, whether it gets network, the response message)
 CALLS = {"Describe": ("describe", False, pb.DescribeResponse), "Plan": ("plan", False, pb.PlanResponse),
          "RunUnit": ("run_unit", True, pb.RunUnitResponse), "Merge": ("merge", False, pb.MergeResponse),
          "Run": ("run", True, pb.RunResponse)}
+error = failure.error
 
 
 @dataclass(frozen=True)
 class Answer:
-    """What a call answers when it succeeds. not_read holds (what, why) pairs."""
+    """What a call answers when it succeeds. not_read holds (what, why) pairs. Warnings are 1 to 500
+    characters and not_read's what and why 1 to 300 (envelope.schema.json); an Answer that breaks that is
+    answered as internal."""
     data: Any
     not_read: Sequence[tuple[str, str]] = ()
     warnings: Sequence[str] = ()
 
 
 class Refusal(Exception):
-    """A call that fails: code is one of CODES, with at least one warning saying why."""
+    """A call that fails: code is one of CODES, with at least one warning saying why, each within
+    envelope.schema.json's limits (a Refusal that breaks them raises ValueError, which is internal)."""
 
     def __init__(self, code: str, warnings: Sequence[str], not_read: Sequence[tuple[str, str]] = ()):
         if code not in CODES:
             raise ValueError(f"a Refusal's code is one of {sorted(CODES)}, not {code!r}")
-        if not warnings or not all(isinstance(w, str) and w for w in warnings):
-            raise ValueError("a Refusal has at least one warning, each a non-empty string")
+        if not warnings:
+            raise ValueError("a Refusal has at least one warning")
+        why = failure.check_strings(warnings, not_read)
+        if why:
+            raise ValueError(why)
         super().__init__("; ".join(warnings))
         self.code, self.warnings, self.not_read = code, list(warnings), list(not_read)
 
 
-def _not_read(pairs: Sequence[tuple[str, str]]) -> list[dict[str, str]]:
-    return [{"what": what, "why": why} for what, why in pairs]
-
-
-def _body_size(code: str, message: str, details: list[ErrorDetail]) -> int:
-    """The length of the error body connectrpc 0.13.0 writes (its ConnectWireError.to_dict, json.dumps)."""
-    body: dict[str, Any] = {"code": code, "message": message}
-    if details:
-        body["details"] = [{"type": d.type_name, "value": _b64(d.message_bytes)} for d in details]
-    return len(json.dumps(body, ensure_ascii=False).encode("utf-8"))
-
-
-def _b64(data: bytes) -> str:
-    return base64.b64encode(data).decode("ascii").rstrip("=")
-
-
-def error(code: str, warnings: Sequence[str], not_read: Sequence[tuple[str, str]] = (),
-          cap: int | None = None) -> ConnectError:
-    """The Connect error for a refusal, with its Failure detail, fitted into cap bytes."""
-    failure = pb.Failure.from_json(json.dumps(
-        {"ok": False, "data": None, "notRead": _not_read(not_read), "warnings": list(warnings)}))
-    message = "; ".join(warnings)
-    details = [ErrorDetail(AnyMessage.pack(failure))]  # packed: connectrpc then adds no debug copy
-    if cap is not None and _body_size(code, message, details) > cap:
-        details = []
-        if _body_size(code, message, details) > cap:
-            message = ""
-    return ConnectError(CODES[code], message, details=details)
+class _Late(Exception):
+    pass
 
 
 def _within(seconds: float, fn, *args):
-    """fn(*args), or deadline_exceeded after seconds; the plugin's own exceptions pass through."""
+    """fn(*args), or _Late after seconds; the plugin's own exceptions pass through."""
     box: dict[str, Any] = {}
 
     def target():
@@ -106,7 +83,7 @@ def _within(seconds: float, fn, *args):
     worker.start()
     worker.join(seconds)
     if worker.is_alive():
-        raise ConnectError(Code.DEADLINE_EXCEEDED, f"the call did not finish within {seconds:g} seconds")
+        raise _Late()
     if "error" in box:
         raise box["error"]
     return box["value"]
@@ -135,7 +112,7 @@ class _Service:
 
     def _call(self, call: str, request, ctx):
         method, with_network, response_class = CALLS[call]
-        req = json.loads(request.to_json())
+        req = codec.integers(json.loads(request.to_json()))  # Struct holds doubles: 5, never 5.0
         caps = req.get("caps") or {}
         cap = caps.get("outputBytes") or None
         why = rules.check(call, req)
@@ -143,7 +120,7 @@ class _Service:
             raise error("invalid_argument", [why], cap=cap)
         fn = getattr(self.plugin, method, None)
         if fn is None:
-            raise ConnectError(Code.UNIMPLEMENTED, f"this plugin does not answer {call}")
+            raise error("unimplemented", [f"this plugin does not answer {call}"], cap=cap)
         args = [] if call == "Describe" else [req["input"]]
         if with_network:
             net = req["network"]
@@ -156,25 +133,28 @@ class _Service:
             seconds = min(seconds, max(left, 0) / 1000)
         try:
             answer = _within(seconds, fn, *args)
+        except _Late:
+            raise error("deadline_exceeded", [f"the call did not finish within {seconds:g} seconds"], cap=cap) from None
         except Refusal as r:
             raise error(r.code, r.warnings, r.not_read, cap) from None
-        except ConnectError:
-            raise
         except Exception as e:  # noqa: BLE001 # the plugin's own bug: internal, naming only its type
-            raise ConnectError(Code.INTERNAL, f"the plugin's {method} raised {type(e).__name__}") from e
+            raise error("internal", [f"the plugin's {method} raised {type(e).__name__}"], cap=cap) from e
         if not isinstance(answer, Answer):
-            raise ConnectError(Code.INTERNAL, f"the plugin's {method} returned {type(answer).__name__}, not an Answer")
+            raise error("internal", [f"the plugin's {method} returned {type(answer).__name__}, not an Answer"], cap=cap)
+        why = failure.check_strings(answer.warnings, answer.not_read)
+        if why:
+            raise error("internal", [f"the plugin's {method} answer: {why}"], cap=cap)
         data = answer.data
         if call == "Describe":
             if not isinstance(data, dict):
-                raise ConnectError(Code.INTERNAL, "the plugin's describe data is not an object")
+                raise error("internal", ["the plugin's describe data is not an object"], cap=cap)
             data = dict(data, protocol=PACKAGE, contracts=[PACKAGE])
         try:
             response = response_class.from_json(json.dumps(
-                {"ok": True, "data": data, "notRead": _not_read(answer.not_read), "warnings": list(answer.warnings)},
+                {"ok": True, "data": data, "notRead": failure.not_read_json(answer.not_read), "warnings": list(answer.warnings)},
                 allow_nan=False))
         except (TypeError, ValueError) as e:
-            raise ConnectError(Code.INTERNAL, f"the plugin's {method} answer is not JSON: {str(e)[:120]}") from None
+            raise error("internal", [f"the plugin's {method} answer is not JSON: {str(e)[:120]}"], cap=cap) from None
         size = len(codec.envelope_json(response))
         if size > cap:
             raise error("resource_exhausted", [f"the answer is larger than outputBytes ({size} > {cap} bytes)"], cap=cap)

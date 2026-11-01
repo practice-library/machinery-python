@@ -20,7 +20,7 @@ class Plugin:
 serve(Plugin())  # prints http://127.0.0.1:<port> first, then serves until interrupted
 ```
 
-The plugin receives plain JSON values:
+The plugin receives plain JSON values, with integral numbers as integers (`5`, not the `5.0` a `Struct` holds):
 - `input` is the call's input.
 - `caps` is `{"timeSeconds", "outputBytes"}`.
 - `network` is `{"hosts": [...]}`, or `{"hosts": [], "replay": {"start", "exchanges"}}`, with the defaults filled in.
@@ -29,10 +29,10 @@ The plugin itself does only its job. The runtime does the rest:
 
 - **Decoding** (`machinery_runtime/codec.py`). The body must be strict JSON: UTF-8, no key given twice, no NaN or Infinity, no lone surrogate. Every field must be known. Proto's JSON leniency is kept: proto field names, integers written as strings, and null for a field that is left out. Anything else is `invalid_argument`.
 - **The rules proto cannot state** (`machinery_runtime/rules.py`). These are the caps bounds, input on every call but `Describe`, network on `RunUnit` and `Run`, the host pattern, replay only with an empty hosts, the replay start, and each recorded response. A broken rule is `invalid_argument`, with the rule as the warning.
-- **Unknown calls and other content types.** A path the runtime does not serve is 404, which Connect clients read as `unimplemented`. A body that is not `application/json` is 415.
+- **Answers before the runtime runs.** connectrpc answers these as a transport would, with no Failure detail: 404 for a path that is not served (Connect clients read it as `unimplemented`), 415 for a body that is not `application/json`, and Connect errors for a request over 16 MiB, a `Content-Encoding`, or a `Connect-Timeout-Ms` that is not a number.
 - **The deadline.** It is `caps.timeSeconds` or `Connect-Timeout-Ms`, whichever is sooner. After it the answer is `deadline_exceeded`; the plugin's thread is left to finish on its own.
 - **Writing the answer.** Every envelope field is written. A number whose value is integral is written as an integer: `3`, never `3.0` (machinery#29, since protobuf-py writes doubles with a fraction). An answer larger than `caps.outputBytes` is refused as `resource_exhausted`.
-- **Refusals.** A `Refusal` becomes its Connect code. Its warnings, joined by `"; "`, become the message, and its envelope (`ok` false, `data` null) is attached as a `machinery.plugin.v1alpha1.Failure` detail. Every error body fits `caps.outputBytes`: the detail is dropped first, then the message. A plugin that raises anything else, or returns something other than an `Answer`, gets `internal`, never a success.
+- **Errors** (`machinery_runtime/failure.py`). A `Refusal` becomes its Connect code. A plugin that raises anything else, or returns something other than a valid `Answer`, gets `internal`, never a success. Every error the runtime answers, including its own `invalid_argument`, `unimplemented`, `deadline_exceeded` and `internal`, has its warnings joined by `"; "` as the message and its envelope (`ok` false, `data` null) as a `machinery.plugin.v1alpha1.Failure` detail, as the plugin.proto header requires. An error body fits `caps.outputBytes` by saying less, never by dropping the detail: notRead goes first, then every warning but the first, then the end of that warning. Warnings are 1 to 500 characters and not_read's what and why 1 to 300, as `envelope.schema.json` allows; a `Refusal` or `Answer` that breaks this is `internal`.
 - **What it serves.** Only Connect JSON, uncompressed, so the bytes counted against `outputBytes` are the bytes sent. The server is the standard library's `wsgiref`, threaded, on loopback only; gRPC is not served.
 
 ## Dependencies

@@ -6,7 +6,7 @@ Connect runner can check its answers, but it refreshes nothing. Each call shows 
   Plan      no work: a plan with no units, decided nothing (maxParallel 1 shows integers leave as 3, not
             3.0); failed_precondition when the graph has nodes; it overruns its caps when timeSeconds is 1.
   RunUnit   unavailable: it never fetches, so it always asks to be tried later.
-  Merge     an answer one byte larger than outputBytes, which the runtime refuses (resource_exhausted).
+  Merge     an answer larger than outputBytes, which the runtime refuses (resource_exhausted).
   Run       not a method here: the runtime answers unimplemented.
 
   python3 examples/minimal.py [--port 0]   # prints its base URL first

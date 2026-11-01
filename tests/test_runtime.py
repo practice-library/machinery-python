@@ -11,9 +11,11 @@ import unittest
 import urllib.error
 import urllib.request
 
+from connectrpc.code import Code
+from connectrpc.errors import ConnectError
 from machinery.plugin.v1alpha1 import plugin_pb as pb
 
-from machinery_runtime import Answer, Refusal, codec, rules, server
+from machinery_runtime import Answer, Refusal, codec, failure, rules, server
 
 SVC = "/machinery.plugin.v1alpha1.PluginService/"
 CAPS = {"timeSeconds": 60, "outputBytes": 1048576}
@@ -30,6 +32,8 @@ class Codec(unittest.TestCase):
         self.assertEqual(codec.integers({"a": [3.0, 2.5, -0.0, 2.0 ** 53, 2.0 ** 53 + 2, True]}),
                          {"a": [3, 2.5, 0, 2 ** 53, 2.0 ** 53 + 2, True]})
         self.assertIsInstance(codec.integers(2.0 ** 53 + 2), float)
+        self.assertIs(type(codec.integers(2.0 ** 53)), int)
+        self.assertIs(type(codec.integers(-(2.0 ** 53))), int)
 
     def test_the_envelope_has_every_field_and_integers(self):
         msg = pb.PlanResponse.from_json('{"ok": true, "data": {"n": 3, "x": 0.5}}')
@@ -46,8 +50,9 @@ class Codec(unittest.TestCase):
     def test_decode_refuses_unknown_fields_and_keeps_protos_leniency(self):
         c = codec.StrictJSONCodec()
         for body in (b'{"caps": {"timeSeconds": 1, "timeSeconds": 2}}', b'{"caps": {"timeSeconds": NaN}}'):
-            with self.subTest(body=body), self.assertRaises(ValueError):
+            with self.subTest(body=body), self.assertRaises(ConnectError) as raised:
                 c.decode(body, pb.DescribeRequest)
+            self.assertEqual((raised.exception.code, len(raised.exception.details)), (Code.INVALID_ARGUMENT, 1))
         with self.assertRaises(Exception):
             c.decode(b'{"caps": {"timeSeconds": 1, "outputBytes": 1024, "retries": 1}}', pb.DescribeRequest)
         req = c.decode(b'{"caps": {"time_seconds": "60", "output_bytes": 2048}}', pb.DescribeRequest)
@@ -193,21 +198,93 @@ class Server(unittest.TestCase):
         self.assertEqual(json.loads(failure.to_json()), {"data": None, "notRead": [{"what": "x", "why": "y"}],
                                                          "warnings": ["later", "really"]})
 
-    def test_an_error_body_fits_output_bytes_dropping_the_detail_then_the_message(self):
-        long = ["w" * 300]
-        for cap, has_detail, has_message in ((1024, True, True), (400, False, True), (40, False, False)):
-            err = server.error("failed_precondition", long, cap=cap)
-            size = server._body_size("failed_precondition", err.message, list(err.details))
-            with self.subTest(cap=cap):
-                self.assertEqual((bool(err.details), bool(err.message)), (has_detail, has_message))
-                if has_message:
-                    self.assertLessEqual(size, cap)
+    def failure_of(self, body):
+        err = json.loads(body)
+        [detail] = err["details"]
+        value = detail["value"]
+        env = json.loads(pb.Failure.from_binary(base64.b64decode(value + "=" * (-len(value) % 4))).to_json())
+        self.assertEqual(err["message"], "; ".join(env["warnings"]))
+        return err, env
+
+    def test_an_error_fits_output_bytes_by_saying_less_never_by_dropping_its_detail(self):
+        # at the smallest outputBytes the contract allows, with warnings it allows (up to 500 characters)
+        for warnings, not_read in ((["w" * 420], ()), (["é" * 300], ()), (["a" * 500, "b" * 500], [("x" * 300, "y" * 300)])):
+            err = failure.error("unavailable", warnings, not_read, cap=1024)
+            with self.subTest(first=warnings[0][:3]):
+                self.assertEqual(len(err.details), 1)
+                self.assertTrue(warnings[0].startswith(err.message) and err.message)
+                self.assertLessEqual(failure.body_size("unavailable", err.message, err.details), 1024)
+
+    def test_an_error_says_less_in_order_not_read_then_later_warnings_then_the_first_ones_end(self):
+        full = failure.error("unavailable", ["one", "two"], [("qq", "zz")])
+        size = failure.body_size("unavailable", full.message, full.details)
+        self.assertEqual(failure.error("unavailable", ["one", "two"], [("qq", "zz")], cap=size).details[0].message_bytes,
+                         full.details[0].message_bytes)
+        less = failure.error("unavailable", ["one", "two"], [("qq", "zz")], cap=size - 1)
+        self.assertEqual((less.message, b"qq" in less.details[0].message_bytes), ("one; two", False))
+        both = failure.body_size("unavailable", less.message, less.details)
+        self.assertEqual(failure.error("unavailable", ["one", "two"], cap=both - 1).message, "one")
+        one = failure.error("unavailable", ["one"])
+        self.assertEqual(failure.error("unavailable", ["one"], cap=failure.body_size("unavailable", one.message, one.details) - 1).message, "on")
+
+    def test_only_below_the_contracts_smallest_output_bytes_does_an_error_lose_its_detail(self):
+        err = failure.error("invalid_argument", ["caps.outputBytes must be 1024 to 16777216, not 40"], cap=40)
+        self.assertEqual((err.message, list(err.details)), ("", []))
+
+    def test_every_error_the_runtime_answers_carries_a_failure(self):
+        self.plugin.answer = lambda i, c: (time.sleep(2), Answer({}))[1]
+        cases = [("Merge", {"caps": CAPS, "input": {}}, {}, "unimplemented"),
+                 ("Plan", {"caps": dict(CAPS, timeSeconds=1), "input": {}}, {}, "deadline_exceeded"),
+                 ("Describe", {"caps": dict(CAPS, outputBytes=1023)}, {}, "invalid_argument"),
+                 ("Describe", b'{"caps": {"timeSeconds": 1, "timeSeconds": 2}}', {}, "invalid_argument"),
+                 ("Describe", b'{"caps": {"retries": 1}}', {}, "invalid_argument"),
+                 ("Describe", b"", {}, "invalid_argument")]
+        for call, body, headers, code in cases:
+            with self.subTest(call=call, body=body):
+                _, _, raw = self.post(call, body, headers)
+                err, env = self.failure_of(raw)
+                self.assertEqual((err["code"], env.get("data", None)), (code, None))
+        for answer in ({"not": "an Answer"}, lambda i, c: 1 / 0):
+            with self.subTest(answer=answer):
+                self.assertEqual(self.failure_of(self.plan(answer)[2])[0]["code"], "internal")
+
+    def test_the_plugin_gets_integral_numbers_as_integers(self):
+        self.plugin.answer = Answer({})
+        self.post("Plan", {"caps": CAPS, "input": {"n": 5, "l": [1, 2.5], "big": 2 ** 53 + 2}})
+        got = self.plugin.calls[0][1]
+        self.assertEqual([type(got["n"]), type(got["l"][0]), type(got["l"][1])], [int, int, float])
+        self.plugin.calls.clear()
+        self.post("RunUnit", {"caps": CAPS, "input": {}, "network": {"replay": {
+            "start": "2026-10-31T12:00:00Z", "exchanges": {"https://a.com/": [{"status": 200}]}}}})
+        self.assertIs(type(self.plugin.calls[0][2]["replay"]["exchanges"]["https://a.com/"][0]["status"]), int)
+
+    def test_an_answer_or_refusal_outside_the_envelopes_limits_is_internal(self):
+        for answer in (Answer({}, warnings=[""]), Answer({}, warnings=["w" * 501]), Answer({}, not_read=[("", "y")]),
+                       Answer({}, not_read=[("x", "y" * 301)]), Answer({}, not_read=[("x",)]),
+                       lambda i, c: (_ for _ in ()).throw(Refusal("unavailable", ["w" * 501]))):
+            with self.subTest(answer=answer):
+                self.assertEqual(json.loads(self.plan(answer)[2])["code"], "internal")
+        self.assertEqual(self.plan(Answer({}, warnings=["w" * 500], not_read=[("x" * 300, "y" * 300)]))[0], 200)
+
+    def test_describe_data_that_is_not_an_object_is_internal(self):
+        saved = Plugin.describe
+        Plugin.describe = lambda self, caps: Answer(["not", "an", "object"])
+        try:
+            self.assertEqual(json.loads(self.post("Describe", {"caps": CAPS})[2])["code"], "internal")
+        finally:
+            Plugin.describe = saved
+
+    def test_an_answer_of_exactly_output_bytes_passes_and_one_byte_more_fails(self):
+        msg = pb.PlanResponse.from_json(json.dumps({"ok": True, "data": {"s": "x" * 1500}}))
+        size = len(codec.envelope_json(msg))
+        self.assertEqual(self.plan(Answer({"s": "x" * 1500}), outputBytes=size)[0], 200)
+        self.assertEqual(self.plan(Answer({"s": "x" * 1500}), outputBytes=size - 1)[0], 429)
 
     def test_the_body_size_is_what_is_sent(self):
         self.plugin.answer = lambda i, c: (_ for _ in ()).throw(Refusal("failed_precondition", ["no " * 20]))
         _, _, body = self.post("Plan", {"caps": CAPS, "input": {}})
-        err = server.error("failed_precondition", ["no " * 20], cap=CAPS["outputBytes"])
-        self.assertEqual(len(body), server._body_size("failed_precondition", err.message, list(err.details)))
+        err = failure.error("failed_precondition", ["no " * 20], cap=CAPS["outputBytes"])
+        self.assertEqual(len(body), failure.body_size("failed_precondition", err.message, err.details))
 
     def test_an_answer_over_output_bytes_is_resource_exhausted(self):
         status, _, body = self.plan(Answer({"s": "x" * 2000}), outputBytes=1024)
@@ -234,7 +311,6 @@ class Server(unittest.TestCase):
             with self.subTest(answer=answer):
                 status, _, body = self.plan(answer)
                 self.assertEqual((status, json.loads(body)["code"]), (500, "internal"))
-                self.assertNotIn("details", json.loads(body))
 
     def test_a_call_without_a_method_is_unimplemented(self):
         status, _, body = self.post("Merge", {"caps": CAPS, "input": {}})
@@ -257,6 +333,16 @@ class Server(unittest.TestCase):
         err = json.loads(body)
         self.assertEqual((status, err["code"]), (400, "invalid_argument"))
         self.assertTrue(err["message"].startswith("caps.outputBytes must be 1024 to 16777216"))
+
+
+class Bind(unittest.TestCase):
+    def test_the_server_binds_without_looking_up_a_host_name(self):
+        import socket
+        from unittest import mock
+        with mock.patch.object(socket, "getfqdn", side_effect=AssertionError("looked up")):
+            srv = server._Server(("127.0.0.1", 0), server._Quiet)
+        self.assertEqual(srv.server_name, "127.0.0.1")
+        srv.server_close()
 
 
 class RefusalShape(unittest.TestCase):

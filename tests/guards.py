@@ -14,6 +14,7 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 R, C, V = "machinery_runtime/rules.py", "machinery_runtime/codec.py", "machinery_runtime/server.py"
+F = "machinery_runtime/failure.py"
 
 GUARDS = [
     # (what the guard keeps true, file, code, code without the guard)
@@ -36,14 +37,25 @@ GUARDS = [
     ("recorded headers are strings", R, "all(isinstance(v, str) for v in headers.values())", "True"),
     ("Connect-Timeout-Ms shortens the deadline", V, "seconds = min(seconds, max(left, 0) / 1000)", "pass"),
     ("an answer over outputBytes is refused", V, "        if size > cap:", "        if False:"),
-    ("an error drops its detail to fit outputBytes", V, "        details = []\n        if _body_size", "        pass\n        if _body_size"),
-    ("an error drops its message to fit outputBytes", V, "            message = \"\"", "            pass"),
-    ("describe names the runtime's package", V, "data = dict(data, protocol=PACKAGE, contracts=[PACKAGE])", "pass"),
+        ("describe names the runtime's package", V, "data = dict(data, protocol=PACKAGE, contracts=[PACKAGE])", "pass"),
     ("network reaches the plugin with its defaults", V, 'args.append(dict({"hosts": []}, **net) if "replay" not in net else', 'args.append(net if True else'),
-    ("a Failure detail carries no debug copy", V, "ErrorDetail(AnyMessage.pack(failure))", "ErrorDetail(failure)"),
+    ("a Failure detail carries no debug copy", F, "ErrorDetail(AnyMessage.pack(pb.Failure.from_json(json.dumps(envelope))))", "ErrorDetail(pb.Failure.from_json(json.dumps(envelope)))"),
     ("a plugin that answers no Answer is internal", V, "if not isinstance(answer, Answer):", "if False:"),
     ("answers are never compressed", V, "compressions=[],", ""),
-    ("a Refusal has a warning", V, '        if not warnings or not all(isinstance(w, str) and w for w in warnings):', "        if False:"),
+    ("the plugin gets integral numbers as integers", V, "req = codec.integers(json.loads(request.to_json()))", "req = json.loads(request.to_json())"),
+    ("an error drops notRead first to fit", F, "        message, details = _parts(warnings, ())\n", "        pass\n"),
+    ("an error keeps its detail by shortening its first warning", F, "if body_size(code, *_parts([first[:mid]], ())) <= cap:", "if False:"),
+    ("an error fits at exactly outputBytes", F, "    if cap is not None and body_size(code, message, details) > cap:\n        message, details = _parts(warnings, ())", "    if cap is not None and body_size(code, message, details) >= cap:\n        message, details = _parts(warnings, ())"),
+    ("a warning within the envelope's limits", F, "not 1 <= len(w) <= WARNING_MAX", "not 1 <= len(w)"),
+    ("a not_read entry within the envelope's limits", F, "1 <= len(s) <= NOT_READ_MAX for s in pair", "True for s in pair"),
+    ("an Answer outside the envelope's limits is internal", V, "        why = failure.check_strings(answer.warnings, answer.not_read)\n        if why:", "        why = None\n        if why:"),
+    ("a decoding error carries a Failure", C, 'raise failure.error("invalid_argument", [f"the body is not a valid', 'raise ValueError(*[f"the body is not a valid'),
+    ("unimplemented carries a Failure", V, 'raise error("unimplemented", [f"this plugin does not answer {call}"], cap=cap)', 'raise ConnectError(Code.UNIMPLEMENTED, "no")'),
+    ("deadline_exceeded carries a Failure", V, 'raise error("deadline_exceeded", [f"the call did not finish within {seconds:g} seconds"], cap=cap) from None', 'raise ConnectError(Code.DEADLINE_EXCEEDED, "late") from None'),
+    ("describe data that is not an object is internal", V, "            if not isinstance(data, dict):", "            if False:"),
+    ("an answer of exactly outputBytes passes", V, "        if size > cap:", "        if size >= cap:"),
+    ("the server binds without looking up a host name", V, "        socketserver.TCPServer.server_bind(self)\n        self.server_name", "        WSGIServer.server_bind(self)\n        self.server_name"),
+    ("a Refusal has a warning", V, "        if not warnings:\n            raise", "        if False:\n            raise"),
 ]
 
 
