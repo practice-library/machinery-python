@@ -37,7 +37,7 @@ GUARDS = [
     ("recorded headers are strings", R, "all(isinstance(v, str) for v in headers.values())", "True"),
     ("Connect-Timeout-Ms shortens the deadline", V, "seconds = min(seconds, max(left, 0) / 1000)", "pass"),
     ("an answer over outputBytes is refused", V, "        if size > cap:", "        if False:"),
-        ("describe names the runtime's package", V, "data = dict(data, protocol=PACKAGE, contracts=[PACKAGE])", "pass"),
+    ("describe names the runtime's package", V, "data = dict(data, protocol=PACKAGE, contracts=[PACKAGE])", "pass"),
     ("network reaches the plugin with its defaults", V, 'args.append(dict({"hosts": []}, **net) if "replay" not in net else', 'args.append(net if True else'),
     ("a Failure detail carries no debug copy", F, "ErrorDetail(AnyMessage.pack(pb.Failure.from_json(json.dumps(envelope))))", "ErrorDetail(pb.Failure.from_json(json.dumps(envelope)))"),
     ("a plugin that answers no Answer is internal", V, "if not isinstance(answer, Answer):", "if False:"),
@@ -55,6 +55,10 @@ GUARDS = [
     ("describe data that is not an object is internal", V, "            if not isinstance(data, dict):", "            if False:"),
     ("an answer of exactly outputBytes passes", V, "        if size > cap:", "        if size >= cap:"),
     ("the server binds without looking up a host name", V, "        socketserver.TCPServer.server_bind(self)\n        self.server_name", "        WSGIServer.server_bind(self)\n        self.server_name"),
+    ("a decoding error fits the smallest outputBytes", C, "cap=rules.OUTPUT_BYTES[0]) from e", "cap=None) from e"),
+    ("the first warning's prefix fits exactly at the cap", F, "if body_size(code, *_parts([first[:mid]], ())) <= cap:", "if body_size(code, *_parts([first[:mid]], ())) < cap:"),
+    ("a warning is cut to the envelope's 500 characters", F, "    warnings = [w[:WARNING_MAX] for w in warnings]\n", ""),
+    ("a not_read entry is a pair", F, "isinstance(pair, (tuple, list)) and len(pair) == 2", "isinstance(pair, (tuple, list))"),
     ("a Refusal has a warning", V, "        if not warnings:\n            raise", "        if False:\n            raise"),
 ]
 

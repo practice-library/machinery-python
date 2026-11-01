@@ -231,6 +231,29 @@ class Server(unittest.TestCase):
         err = failure.error("invalid_argument", ["caps.outputBytes must be 1024 to 16777216, not 40"], cap=40)
         self.assertEqual((err.message, list(err.details)), ("", []))
 
+    def test_a_body_that_does_not_decode_gets_an_error_that_fits_any_legal_output_bytes(self):
+        # caps.outputBytes is inside the body that did not decode, so the error fits the smallest legal one
+        for key in ("k" * 2000, "\U0001F600" * 600):
+            body = json.dumps({"caps": {"timeSeconds": 60, "outputBytes": 1024}, key: 1}).encode()
+            with self.subTest(key=key[:3]):
+                _, _, raw = self.post("Describe", body)
+                self.assertLessEqual(len(raw), 1024)
+                err, _ = self.failure_of(raw)
+                self.assertEqual(err["code"], "invalid_argument")
+
+    def test_the_first_warnings_prefix_fits_exactly_at_the_cap(self):
+        warning = "x" * 600
+        for k in (1, 37, 499):
+            whole = failure.error("internal", [warning[:k]])
+            cap = failure.body_size("internal", whole.message, whole.details)
+            with self.subTest(k=k):
+                self.assertEqual(failure.error("internal", [warning], cap=cap).message, warning[:k])
+                self.assertEqual(failure.error("internal", [warning], cap=cap - 1).message, warning[:k - 1])
+
+    def test_a_warning_longer_than_the_envelope_allows_is_cut_to_500_characters(self):
+        err = failure.error("internal", ["w" * 600])
+        self.assertEqual(err.message, "w" * 500)
+
     def test_every_error_the_runtime_answers_carries_a_failure(self):
         self.plugin.answer = lambda i, c: (time.sleep(2), Answer({}))[1]
         cases = [("Merge", {"caps": CAPS, "input": {}}, {}, "unimplemented"),
@@ -261,7 +284,8 @@ class Server(unittest.TestCase):
     def test_an_answer_or_refusal_outside_the_envelopes_limits_is_internal(self):
         for answer in (Answer({}, warnings=[""]), Answer({}, warnings=["w" * 501]), Answer({}, not_read=[("", "y")]),
                        Answer({}, not_read=[("x", "y" * 301)]), Answer({}, not_read=[("x",)]),
-                       lambda i, c: (_ for _ in ()).throw(Refusal("unavailable", ["w" * 501]))):
+                       lambda i, c: (_ for _ in ()).throw(Refusal("unavailable", ["w" * 501])),
+                       lambda i, c: (_ for _ in ()).throw(Refusal("unavailable", ["w"], not_read=[("x",)]))):
             with self.subTest(answer=answer):
                 self.assertEqual(json.loads(self.plan(answer)[2])["code"], "internal")
         self.assertEqual(self.plan(Answer({}, warnings=["w" * 500], not_read=[("x" * 300, "y" * 300)]))[0], 200)
