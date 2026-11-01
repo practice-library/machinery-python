@@ -24,6 +24,8 @@ GUARDS = [
     ("the decoder is strict JSON", C, "        strict_load(data)\n", ""),
     ("unknown fields are refused", C, "ignore_unknown_fields=False", "ignore_unknown_fields=True"),
     ("an integer too large for a double is refused", C, "object_pairs_hook=_pairs, parse_int=_integer)", "object_pairs_hook=_pairs)"),
+    ("an integer that rounds to a finite double is accepted", C, "        float(value)\n",
+     "        float(value)\n        if abs(value) > int(1.7976931348623157e308):\n            raise OverflowError\n"),
     ("a lone surrogate or a non-finite number is refused", C, '    json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")\n', ""),
     ("a number that overflows to infinity is refused", C, "ensure_ascii=False, allow_nan=False)", "ensure_ascii=False)"),
     ("caps bounds hold", R, "if not low <= value <= high:", "if not low - 1 <= value <= high + 1:"),
