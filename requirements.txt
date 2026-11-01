@@ -1,0 +1,26 @@
+# The runtime's dependencies, every one pinned by hash (Python 3.11 or later).
+# Installed with: python3 -m pip install --require-hashes --only-binary :all: -r requirements.txt
+# The native wheels (protobuf-py-ext, pyqwest) have hashes for linux x86_64 (CI) and macOS arm64 only.
+#
+# The generated code of machinery.plugin.v1alpha1, from practice-library/machinery's release gen/go/v0.1.0
+# (gen/README.md there: rebuilding at that commit gives the same sha256). It is the only one not from PyPI.
+machinery-gen @ https://github.com/practice-library/machinery/releases/download/gen/go/v0.1.0/machinery_gen-0.1.0-py3-none-any.whl \
+    --hash=sha256:166f0afa424798c48bac57403c9d5e6ea6127f1226c8007f81cb23b118a77806
+# The Connect runtime, and the message library it and the generated code are written for.
+connectrpc==0.13.0 \
+    --hash=sha256:21e3839e6745606c72098a2e50b4d52c82dd2c4e21c0e75fbd7b9413548572fd
+protobuf-py==0.7.0 \
+    --hash=sha256:215c7083946cbe484f1734ba47bfc04913c1b8aa0ad3f0dc36d81da50d6e7fab
+protobuf-py-pure==0.7.0 \
+    --hash=sha256:9871a60800778e406d1378b589d2dd53da7c13cd644d16f6444d521443c99565
+protobuf-py-ext==0.7.0 \
+    --hash=sha256:413fdff185d8a0eacdbd4bbd161d8ee73e028eae5fcd7fd8fa879ce2a8481fe6 \
+    --hash=sha256:7bb0e73a8468dafa8caa4e107c6125ded903dc72f527b9c6e1b84cc24fe1e901
+# connectrpc's HTTP client; the runtime serves with the standard library's wsgiref and does not use it.
+pyqwest==0.12.0 \
+    --hash=sha256:699662fca52a1595a1ed9c169816b7654c0b28308b9284091e96bbc79b8e408f \
+    --hash=sha256:c1af3aad4eef813efc43f40a6e4e2791643d42f9218b6f1e9f9bdaa2a19bdc7d
+opentelemetry-api==1.45.1 \
+    --hash=sha256:b31553efa588ae44bc306f863c785c5333a9ecc091248c6ee68b4b6c87fdedfb
+typing_extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8

@@ -1,0 +1,650 @@
+{
+  "about": "The network rules proto cannot state; a request that keeps them reaches the plugin, which answers unavailable.",
+  "procedure": "machinery.plugin.v1alpha1.PluginService/RunUnit",
+  "defaults": {
+    "caps": {
+      "timeSeconds": 60,
+      "outputBytes": 1048576
+    },
+    "network": {
+      "hosts": [
+        "docs.example.com"
+      ]
+    },
+    "input": {
+      "id": "host:docs.example.com",
+      "shardKey": "docs.example.com",
+      "pacing": {
+        "minIntervalSeconds": 2.0
+      },
+      "budget": {
+        "requests": 10
+      },
+      "host": {
+        "host": "docs.example.com",
+        "format": "html",
+        "maxBytes": 2000000,
+        "timeoutSeconds": 30
+      },
+      "userAgent": "practice-library-graphs/1 (+https://github.com/practice-library/graphs)",
+      "retryAfterMaxSeconds": 60,
+      "facts": [
+        {
+          "node": "rule.example.a",
+          "source": "https://docs.example.com/a",
+          "measuredAt": "2026-09-01",
+          "quote": {
+            "text": "Each key may send 20 requests per second."
+          }
+        },
+        {
+          "node": "rule.example.b",
+          "source": "https://docs.example.com/b",
+          "measuredAt": "2026-09-02",
+          "quote": {
+            "text": "The free plan includes 1,000 calls."
+          }
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "a valid unit reaches the plugin: unavailable with a Failure detail",
+      "request": {},
+      "expect": {
+        "code": "unavailable",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            "this example never fetches: try the unit again later"
+          ]
+        }
+      }
+    },
+    {
+      "name": "network {} is no connection, and reaches the plugin",
+      "request": {
+        "network": {}
+      },
+      "expect": {
+        "code": "unavailable",
+        "envelope": {
+          "ok": false
+        }
+      }
+    },
+    {
+      "name": "replay with an empty hosts reaches the plugin",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "status": 200,
+                  "body": ""
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "unavailable",
+        "envelope": {
+          "ok": false
+        }
+      }
+    },
+    {
+      "name": "replay without exchanges reaches the plugin",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z"
+          }
+        }
+      },
+      "expect": {
+        "code": "unavailable",
+        "envelope": {
+          "ok": false
+        }
+      }
+    },
+    {
+      "name": "a recorded error alone reaches the plugin",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "error": "connection reset"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "unavailable",
+        "envelope": {
+          "ok": false
+        }
+      }
+    },
+    {
+      "name": "run-unit without network is invalid_argument",
+      "rawBody": "{\"caps\": {\"timeSeconds\": 60, \"outputBytes\": 1048576}, \"input\": {\"id\": \"host:docs.example.com\", \"shardKey\": \"docs.example.com\", \"pacing\": {\"minIntervalSeconds\": 2.0}, \"budget\": {\"requests\": 10}, \"host\": {\"host\": \"docs.example.com\", \"format\": \"html\", \"maxBytes\": 2000000, \"timeoutSeconds\": 30}, \"userAgent\": \"practice-library-graphs/1 (+https://github.com/practice-library/graphs)\", \"retryAfterMaxSeconds\": 60, \"facts\": [{\"node\": \"rule.example.a\", \"source\": \"https://docs.example.com/a\", \"measuredAt\": \"2026-09-01\", \"quote\": {\"text\": \"Each key may send 20 requests per second.\"}}, {\"node\": \"rule.example.b\", \"source\": \"https://docs.example.com/b\", \"measuredAt\": \"2026-09-02\", \"quote\": {\"text\": \"The free plan includes 1,000 calls.\"}}]}}",
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network is required on RunUnit"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a listed host with replay is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [
+            "docs.example.com"
+          ],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "status": 200
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network has both hosts and replay"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a host in upper case is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [
+            "Docs.example.com"
+          ]
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.hosts:"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a host without a dot is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [
+            "localhost"
+          ]
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.hosts:"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a host with a trailing newline is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [
+            "docs.example.com\n"
+          ]
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.hosts:"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a replay start that is not UTC to the second is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00+00:00"
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.start:"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "replay without a start is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "exchanges": {}
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.start:"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a recorded status that is not an integer is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "status": 200.5
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.exchanges"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a recorded status 99 is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "status": 99
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.exchanges"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a recorded status 600 is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "status": 600
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.exchanges"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a recorded status written as a string is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "status": "200"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.exchanges"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a recorded error with a status is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "status": 200,
+                  "error": "reset"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.exchanges"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a recorded error with headers is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "error": "reset",
+                  "headers": {}
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.exchanges"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "an empty recorded error is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "error": ""
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.exchanges"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a recorded response with neither status nor error is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "body": "x"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.exchanges"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a recorded header that is not a string is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "status": 200,
+                  "headers": {
+                    "retry-after": 60
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.exchanges"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a recorded body that is not a string is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "status": 200,
+                  "body": 1
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.exchanges"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "an unknown field in a recorded response is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                {
+                  "status": 200,
+                  "delay": 1
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.exchanges"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a recorded response that is not an object is invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [],
+          "replay": {
+            "start": "2026-10-31T12:00:00Z",
+            "exchanges": {
+              "https://docs.example.com/robots.txt": [
+                200
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "network.replay.exchanges"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
