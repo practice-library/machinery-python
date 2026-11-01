@@ -255,12 +255,20 @@ class Server(unittest.TestCase):
         self.assertEqual(err.message, "w" * 500)
 
     def test_a_number_that_overflows_to_infinity_is_invalid_argument_with_its_failure(self):
-        for input_json in ('{"a": -1e400}', '{"a": [1, 1e400]}', '{"a": {"b": 1E999}}'):
+        big = "1" + "0" * 400  # a plain integer literal: Python reads it as an int, protobuf-py as infinity
+        for input_json in ('{"a": -1e400}', '{"a": [1, 1e400]}', '{"a": {"b": 1E999}}', '{"a": %s}' % big,
+                           '{"a": [-%s]}' % big):
             body = ('{"caps": {"timeSeconds": 60, "outputBytes": 1048576}, "input": %s}' % input_json).encode()
             with self.subTest(input=input_json):
                 status, _, raw = self.post("Plan", body)
                 err, _ = self.failure_of(raw)
                 self.assertEqual((status, err["code"]), (400, "invalid_argument"))
+
+    def test_the_largest_integer_a_double_holds_is_accepted(self):
+        self.assertEqual(codec.strict_load(b'{"a": %d}' % (2 ** 1023)), {"a": 2 ** 1023})
+        self.plugin.answer = Answer({})
+        self.assertEqual(self.post("Plan", b'{"caps": {"timeSeconds": 60, "outputBytes": 1048576}, "input": {"a": %d}}'
+                                   % int(1.7976931348623157e308))[0], 200)
 
     def test_a_decoding_error_is_fitted_to_exactly_the_smallest_legal_output_bytes(self):
         from unittest import mock
