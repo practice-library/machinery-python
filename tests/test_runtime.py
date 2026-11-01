@@ -261,8 +261,8 @@ class Server(unittest.TestCase):
             body = ('{"caps": {"timeSeconds": 60, "outputBytes": 1048576}, "input": %s}' % input_json).encode()
             with self.subTest(input=input_json):
                 status, _, raw = self.post("Plan", body)
-                err, _ = self.failure_of(raw)
-                self.assertEqual((status, err["code"]), (400, "invalid_argument"))
+                self.assertEqual(status, 400)  # first, so a runtime that lets it through fails on the status
+                self.assertEqual(self.failure_of(raw)[0]["code"], "invalid_argument")
 
     # 2**1024 - 2**970 is the midpoint between the largest double and 2**1024: below it a literal rounds to the
     # largest double, which is finite; from it on it rounds to infinity (#9)
