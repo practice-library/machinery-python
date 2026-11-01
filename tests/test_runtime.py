@@ -254,6 +254,24 @@ class Server(unittest.TestCase):
         err = failure.error("internal", ["w" * 600])
         self.assertEqual(err.message, "w" * 500)
 
+    def test_a_number_that_overflows_to_infinity_is_invalid_argument_with_its_failure(self):
+        for input_json in ('{"a": -1e400}', '{"a": [1, 1e400]}', '{"a": {"b": 1E999}}'):
+            body = ('{"caps": {"timeSeconds": 60, "outputBytes": 1048576}, "input": %s}' % input_json).encode()
+            with self.subTest(input=input_json):
+                status, _, raw = self.post("Plan", body)
+                err, _ = self.failure_of(raw)
+                self.assertEqual((status, err["code"]), (400, "invalid_argument"))
+
+    def test_a_decoding_error_is_fitted_to_exactly_the_smallest_legal_output_bytes(self):
+        from unittest import mock
+        with mock.patch.object(failure, "error", wraps=failure.error) as built, self.assertRaises(ConnectError):
+            codec.StrictJSONCodec().decode(b'{"caps": {"retries": 1}}', pb.DescribeRequest)
+        self.assertEqual(built.call_args.kwargs["cap"], 1024)
+
+    def test_a_refusal_whose_not_read_is_not_a_pair_is_internal_with_its_failure(self):
+        _, _, raw = self.plan(lambda i, c: (_ for _ in ()).throw(Refusal("unavailable", ["w"], not_read=[("x",)])))
+        self.assertEqual(self.failure_of(raw)[0]["code"], "internal")
+
     def test_every_error_the_runtime_answers_carries_a_failure(self):
         self.plugin.answer = lambda i, c: (time.sleep(2), Answer({}))[1]
         cases = [("Merge", {"caps": CAPS, "input": {}}, {}, "unimplemented"),

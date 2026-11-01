@@ -99,6 +99,13 @@
       "expect": {
         "code": "invalid_argument"
       }
+    },
+    {
+      "name": "a nested number that overflows to infinity is invalid_argument",
+      "rawBody": "{\"caps\": {\"timeSeconds\": 60, \"outputBytes\": 1048576}, \"input\": {\"graph\": \"vendors/example\", \"n\": -1e400}}",
+      "expect": {
+        "code": "invalid_argument"
+      }
     }
   ]
 }

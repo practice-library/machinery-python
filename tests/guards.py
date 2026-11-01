@@ -23,8 +23,8 @@ GUARDS = [
     ("data is always written", C, '    obj.setdefault("data", None)\n', ""),
     ("the decoder is strict JSON", C, "        strict_load(data)\n", ""),
     ("unknown fields are refused", C, "ignore_unknown_fields=False", "ignore_unknown_fields=True"),
-    ("NaN and Infinity are refused", C, "parse_constant=_constant", "parse_constant=float"),
-    ("a lone surrogate is refused", C, '    json.dumps(value, ensure_ascii=False).encode("utf-8")  # a lone surrogate cannot be UTF-8\n', ""),
+    ("a lone surrogate is refused", C, '    json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")\n', ""),
+    ("a number that overflows to infinity is refused", C, "ensure_ascii=False, allow_nan=False)", "ensure_ascii=False)"),
     ("caps bounds hold", R, "if not low <= value <= high:", "if not low - 1 <= value <= high + 1:"),
     ("input is required but on Describe", R, 'if call != "Describe" and "input" not in request:', "if False:"),
     ("network is required on RunUnit and Run", R, '            return f"network is required on {call}"\n', "            return None\n"),
@@ -59,6 +59,7 @@ GUARDS = [
     ("the first warning's prefix fits exactly at the cap", F, "if body_size(code, *_parts([first[:mid]], ())) <= cap:", "if body_size(code, *_parts([first[:mid]], ())) < cap:"),
     ("a warning is cut to the envelope's 500 characters", F, "    warnings = [w[:WARNING_MAX] for w in warnings]\n", ""),
     ("a not_read entry is a pair", F, "isinstance(pair, (tuple, list)) and len(pair) == 2", "isinstance(pair, (tuple, list))"),
+    ("a decoding error is fitted to exactly the smallest legal outputBytes", C, "cap=rules.OUTPUT_BYTES[0]) from e", "cap=rules.OUTPUT_BYTES[0] + 1) from e"),
     ("a Refusal has a warning", V, "        if not warnings:\n            raise", "        if False:\n            raise"),
 ]
 
