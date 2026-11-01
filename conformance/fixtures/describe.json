@@ -1,0 +1,305 @@
+{
+  "about": "Describe, and the request frame every call shares: what the runtime decides before the plugin is called.",
+  "procedure": "machinery.plugin.v1alpha1.PluginService/Describe",
+  "defaults": {
+    "caps": {
+      "timeSeconds": 60,
+      "outputBytes": 1048576
+    }
+  },
+  "cases": [
+    {
+      "name": "describe answers the plugin's verbs, with the runtime's package as protocol and contracts",
+      "request": {},
+      "expect": {
+        "code": "ok",
+        "envelope": {
+          "ok": true,
+          "notRead": [],
+          "warnings": [],
+          "data": {
+            "name": "minimal",
+            "protocol": "machinery.plugin.v1alpha1",
+            "contracts": [
+              "machinery.plugin.v1alpha1"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "a package the runtime does not serve is unimplemented",
+      "procedure": "machinery.plugin.v1alpha99.PluginService/Describe",
+      "request": {},
+      "expect": {
+        "code": "unimplemented"
+      }
+    },
+    {
+      "name": "an unknown call is unimplemented",
+      "procedure": "machinery.plugin.v1alpha1.PluginService/FetchEverything",
+      "request": {},
+      "expect": {
+        "code": "unimplemented"
+      }
+    },
+    {
+      "name": "a call the plugin has no method for is unimplemented",
+      "procedure": "machinery.plugin.v1alpha1.PluginService/Run",
+      "request": {
+        "network": {
+          "hosts": [
+            "docs.example.com"
+          ]
+        },
+        "input": {}
+      },
+      "expect": {
+        "code": "unimplemented"
+      }
+    },
+    {
+      "name": "a body that is not JSON is invalid_argument",
+      "rawBody": "not json",
+      "expect": {
+        "code": "invalid_argument"
+      }
+    },
+    {
+      "name": "a key given twice is invalid_argument",
+      "rawBody": "{\"caps\": {\"timeSeconds\": 60, \"timeSeconds\": 61, \"outputBytes\": 1048576}}",
+      "expect": {
+        "code": "invalid_argument"
+      }
+    },
+    {
+      "name": "NaN is not JSON: invalid_argument",
+      "rawBody": "{\"caps\": {\"timeSeconds\": NaN, \"outputBytes\": 1048576}}",
+      "expect": {
+        "code": "invalid_argument"
+      }
+    },
+    {
+      "name": "a lone surrogate is invalid_argument",
+      "rawBody": "{\"caps\": {\"timeSeconds\": 60, \"outputBytes\": 1048576, \"x\": \"\\ud800\"}}",
+      "expect": {
+        "code": "invalid_argument"
+      }
+    },
+    {
+      "name": "an unknown top-level field is invalid_argument",
+      "request": {
+        "debug": true
+      },
+      "expect": {
+        "code": "invalid_argument"
+      }
+    },
+    {
+      "name": "an unknown field in caps is invalid_argument",
+      "request": {
+        "caps": {
+          "retries": 1
+        }
+      },
+      "expect": {
+        "code": "invalid_argument"
+      }
+    },
+    {
+      "name": "describe with an input is invalid_argument",
+      "request": {
+        "input": {}
+      },
+      "expect": {
+        "code": "invalid_argument"
+      }
+    },
+    {
+      "name": "a request without caps is invalid_argument",
+      "rawBody": "{}",
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "caps is required"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "caps null is caps left out: invalid_argument",
+      "rawBody": "{\"caps\": null}",
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "caps is required"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "caps.timeSeconds true is invalid_argument",
+      "request": {
+        "caps": {
+          "timeSeconds": true
+        }
+      },
+      "expect": {
+        "code": "invalid_argument"
+      }
+    },
+    {
+      "name": "a negative caps.timeSeconds is invalid_argument",
+      "request": {
+        "caps": {
+          "timeSeconds": -1
+        }
+      },
+      "expect": {
+        "code": "invalid_argument"
+      }
+    },
+    {
+      "name": "caps.timeSeconds 1.5 is invalid_argument",
+      "request": {
+        "caps": {
+          "timeSeconds": 1.5
+        }
+      },
+      "expect": {
+        "code": "invalid_argument"
+      }
+    },
+    {
+      "name": "caps.timeSeconds 0 is invalid_argument",
+      "request": {
+        "caps": {
+          "timeSeconds": 0
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "caps.timeSeconds must be 1 to 3600"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "caps.timeSeconds 3601 is invalid_argument",
+      "request": {
+        "caps": {
+          "timeSeconds": 3601
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "caps.timeSeconds must be 1 to 3600"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "caps.timeSeconds 3600 is accepted",
+      "request": {
+        "caps": {
+          "timeSeconds": 3600
+        }
+      },
+      "expect": {
+        "code": "ok"
+      }
+    },
+    {
+      "name": "caps.outputBytes 1023 is invalid_argument",
+      "request": {
+        "caps": {
+          "outputBytes": 1023
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "caps.outputBytes must be 1024 to 16777216"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "caps.outputBytes 1024 is accepted",
+      "request": {
+        "caps": {
+          "outputBytes": 1024
+        }
+      },
+      "expect": {
+        "code": "ok"
+      }
+    },
+    {
+      "name": "caps.outputBytes 16777216 is accepted",
+      "request": {
+        "caps": {
+          "outputBytes": 16777216
+        }
+      },
+      "expect": {
+        "code": "ok"
+      }
+    },
+    {
+      "name": "caps.outputBytes 16777217 is invalid_argument",
+      "request": {
+        "caps": {
+          "outputBytes": 16777217
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "caps.outputBytes must be 1024 to 16777216"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "caps.outputBytes 100 is invalid_argument, and the refusal still fits in it",
+      "request": {
+        "caps": {
+          "outputBytes": 100
+        }
+      },
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false
+        }
+      }
+    }
+  ]
+}

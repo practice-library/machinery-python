@@ -1,0 +1,159 @@
+{
+  "about": "An answer larger than outputBytes is refused by the runtime, never cut.",
+  "procedure": "machinery.plugin.v1alpha1.PluginService/Merge",
+  "defaults": {
+    "caps": {
+      "timeSeconds": 60,
+      "outputBytes": 1048576
+    },
+    "input": {
+      "plan": {
+        "graph": "vendors/example",
+        "commit": "0e6f5ed237dd52f9fe02a33f8c6b8ec653a3a2c3",
+        "run": {
+          "id": 7,
+          "url": "https://github.com/practice-library/machinery/actions/runs/7"
+        },
+        "startedAt": "2026-10-31T12:00:00Z",
+        "maxParallel": 2,
+        "units": [
+          {
+            "id": "host:docs.example.com",
+            "shardKey": "docs.example.com",
+            "pacing": {
+              "minIntervalSeconds": 2.0
+            },
+            "budget": {
+              "requests": 10
+            },
+            "host": {
+              "host": "docs.example.com",
+              "format": "html",
+              "maxBytes": 2000000,
+              "timeoutSeconds": 30
+            },
+            "userAgent": "practice-library-graphs/1 (+https://github.com/practice-library/graphs)",
+            "retryAfterMaxSeconds": 60,
+            "facts": [
+              {
+                "node": "rule.example.a",
+                "source": "https://docs.example.com/a",
+                "measuredAt": "2026-09-01",
+                "quote": {
+                  "text": "Q."
+                }
+              }
+            ]
+          },
+          {
+            "id": "host:help.example.com",
+            "shardKey": "help.example.com",
+            "pacing": {
+              "minIntervalSeconds": 2.0
+            },
+            "budget": {
+              "requests": 10
+            },
+            "host": {
+              "host": "help.example.com",
+              "format": "html",
+              "maxBytes": 2000000,
+              "timeoutSeconds": 30
+            },
+            "userAgent": "practice-library-graphs/1 (+https://github.com/practice-library/graphs)",
+            "retryAfterMaxSeconds": 60,
+            "facts": [
+              {
+                "node": "rule.example.b",
+                "source": "https://help.example.com/b",
+                "measuredAt": "2026-09-01",
+                "quote": {
+                  "text": "Q."
+                }
+              }
+            ]
+          }
+        ],
+        "decided": [
+          {
+            "node": "term.example.offsite",
+            "source": "https://unlisted.example.net/t",
+            "fetchedAt": "2026-10-31T12:00:00Z",
+            "outcome": "unreadable",
+            "reason": "blocked: unlisted.example.net is not listed for example in policy/sources.json; not fetched"
+          }
+        ]
+      },
+      "partials": [
+        {
+          "unit": "host:docs.example.com",
+          "shardKey": "docs.example.com",
+          "requests": 2,
+          "robots": {
+            "host": "docs.example.com",
+            "fetchedAt": "2026-10-31T12:00:01Z",
+            "httpStatus": 200,
+            "verdict": "allowed"
+          },
+          "results": [
+            {
+              "node": "rule.example.a",
+              "source": "https://docs.example.com/a",
+              "fetchedAt": "2026-10-31T12:00:03Z",
+              "outcome": "unchanged",
+              "finalUrl": "https://docs.example.com/a",
+              "httpStatus": 200,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ],
+          "notReached": []
+        },
+        {
+          "unit": "host:help.example.com",
+          "shardKey": "help.example.com",
+          "requests": 2,
+          "robots": {
+            "host": "help.example.com",
+            "fetchedAt": "2026-10-31T12:00:01Z",
+            "httpStatus": 200,
+            "verdict": "allowed"
+          },
+          "results": [
+            {
+              "node": "rule.example.b",
+              "source": "https://help.example.com/b",
+              "fetchedAt": "2026-10-31T12:00:05Z",
+              "outcome": "changed",
+              "finalUrl": "https://help.example.com/b",
+              "httpStatus": 200,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "reason": "quote-gone: the page was read and the quote is not in its text"
+            }
+          ],
+          "notReached": []
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "an answer larger than outputBytes is resource_exhausted, with a Failure detail that fits",
+      "request": {
+        "caps": {
+          "outputBytes": 4096
+        }
+      },
+      "expect": {
+        "code": "resource_exhausted",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "the answer is larger than outputBytes"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

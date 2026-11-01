@@ -1,8 +1,56 @@
 # machinery-python
-Python implementation of the machinery plugin contract: pluggable, standard library only.
+Python implementation of the machinery plugin contract: the thin runtime that serves a plugin as `machinery.plugin.v1alpha1.PluginService`.
 
-Implements contract v0 of [practice-library/machinery](https://github.com/practice-library/machinery) at release v0.1.0 (commit `533522ec`): one JSON request on stdin, one envelope on stdout, and the verb `describe` plus either `plan`, `run-unit` and `merge` (a shardable job) or `run` (one that is not). Version 0 may still change; from version 1 on, a version changes only additively, and anything else is a new major version. At that commit, machinery's black-box suite (`conformance/run.py`) holds cases for the fact-refresh job only, the job this repository's first plugin will carry. Nothing is implemented yet; see issue #1.
+It implements contract v1alpha1 of [practice-library/machinery](https://github.com/practice-library/machinery) (plan practice-library/machinery#17, PR 4): Connect unary JSON over HTTP/1.1 on 127.0.0.1, the calls `Describe`, `Plan`, `RunUnit`, `Merge` and `Run`, and the rules of `contract/v1alpha1/` at machinery commit `d6024652`. v1alpha1 may still change. From v1 on, a version changes only additively, and anything else is a new major version. Contract v0 (stdin and stdout) is not implemented here.
+
+## The runtime
+
+A plugin is an object with some of these methods. The runtime answers `unimplemented` for the ones it lacks:
+
+```python
+from machinery_runtime import Answer, Refusal, serve
+
+class Plugin:
+    def describe(self, caps): ...                   # Answer({"name", "version", "job", "verbs"})
+    def plan(self, input, caps): ...                # Answer(data, not_read=[(what, why)], warnings=[...])
+    def run_unit(self, input, network, caps): ...
+    def merge(self, input, caps): ...
+    def run(self, input, network, caps): ...        # raise Refusal(code, warnings) to fail
+
+serve(Plugin())  # prints http://127.0.0.1:<port> first, then serves until interrupted
+```
+
+The plugin receives plain JSON values:
+- `input` is the call's input.
+- `caps` is `{"timeSeconds", "outputBytes"}`.
+- `network` is `{"hosts": [...]}`, or `{"hosts": [], "replay": {"start", "exchanges"}}`, with the defaults filled in.
+
+The plugin itself does only its job. The runtime does the rest:
+
+- **Decoding** (`machinery_runtime/codec.py`). The body must be strict JSON: UTF-8, no key given twice, no NaN or Infinity, no lone surrogate. Every field must be known. Proto's JSON leniency is kept: proto field names, integers written as strings, and null for a field that is left out. Anything else is `invalid_argument`.
+- **The rules proto cannot state** (`machinery_runtime/rules.py`). These are the caps bounds, input on every call but `Describe`, network on `RunUnit` and `Run`, the host pattern, replay only with an empty hosts, the replay start, and each recorded response. A broken rule is `invalid_argument`, with the rule as the warning.
+- **Unknown calls and other content types.** A path the runtime does not serve is 404, which Connect clients read as `unimplemented`. A body that is not `application/json` is 415.
+- **The deadline.** It is `caps.timeSeconds` or `Connect-Timeout-Ms`, whichever is sooner. After it the answer is `deadline_exceeded`; the plugin's thread is left to finish on its own.
+- **Writing the answer.** Every envelope field is written. A number whose value is integral is written as an integer: `3`, never `3.0` (machinery#29, since protobuf-py writes doubles with a fraction). An answer larger than `caps.outputBytes` is refused as `resource_exhausted`.
+- **Refusals.** A `Refusal` becomes its Connect code. Its warnings, joined by `"; "`, become the message, and its envelope (`ok` false, `data` null) is attached as a `machinery.plugin.v1alpha1.Failure` detail. Every error body fits `caps.outputBytes`: the detail is dropped first, then the message. A plugin that raises anything else, or returns something other than an `Answer`, gets `internal`, never a success.
+- **What it serves.** Only Connect JSON, uncompressed, so the bytes counted against `outputBytes` are the bytes sent. The server is the standard library's `wsgiref`, threaded, on loopback only; gRPC is not served.
+
+## Dependencies
+
+`requirements.txt` pins every dependency by hash. They are:
+- the generated code, `machinery-gen` 0.1.0, from machinery's release `gen/go/v0.1.0`, rebuildable to the same sha256;
+- the Connect runtime, `connectrpc` 0.13.0;
+- its message library, `protobuf-py` 0.7.0;
+- their dependencies.
+
+The native wheels have hashes for linux x86_64 and macOS arm64 only. Python 3.11 or later is required.
 
 ## Checks
 
-`.github/workflows/checks.yml` calls the organisation's reusable workflows from practice-library/.github at release v2.1.0, pinned by full commit: `leak-scan` and the four review guards (`denylist`, `removed-paths`, `release-note`, `schema-loosening`), ending in the `gate` the ruleset requires (`gate / gate`). `.github/required-checks.json` lists exactly the gate's needs. `.github/denylist.json` is the organisation's list, copied from practice-library/.github at that release. Every path is owned by the maintainers (`.github/CODEOWNERS`). `.github/workflows/automerge.yml` merges only allowlisted paths (`.github/automerge-paths.json`; none yet).
+`.github/workflows/checks.yml` runs these jobs:
+- `unit` runs the runtime's tests and `tests/guards.py`. Each guard row removes one check from the runtime, and its test must then fail.
+- `conformance` serves `examples/minimal.py` and runs machinery's Connect runner (`conformance/connect_run.py` at the pinned commit) on `conformance/fixtures/`, with schema validation. That example plugin speaks the fact-refresh job's schemas but refreshes nothing; each of its calls shows one outcome.
+- The organisation's reusable workflows from practice-library/.github at release v2.1.0, pinned by full commit: `leak-scan` and the four review guards (`denylist`, `removed-paths`, `release-note`, `schema-loosening`).
+- The `gate` that the ruleset requires (`gate / gate`).
+
+`.github/required-checks.json` lists exactly the gate's needs. `.github/denylist.json` is the organisation's list, copied from practice-library/.github at that release. Every path is owned by the maintainers (`.github/CODEOWNERS`). `.github/workflows/automerge.yml` merges only allowlisted paths (`.github/automerge-paths.json`, which allows none yet).

@@ -1,0 +1,104 @@
+{
+  "about": "A successful answer, a refusal with its Failure detail, and the deadline.",
+  "procedure": "machinery.plugin.v1alpha1.PluginService/Plan",
+  "defaults": {
+    "caps": {
+      "timeSeconds": 60,
+      "outputBytes": 1048576
+    },
+    "input": {
+      "graph": "vendors/example",
+      "commit": "0e6f5ed237dd52f9fe02a33f8c6b8ec653a3a2c3",
+      "run": {
+        "id": 7,
+        "url": "https://github.com/practice-library/machinery/actions/runs/7"
+      },
+      "now": "2026-10-31T12:00:00Z",
+      "policy": {
+        "maxRequestsPerRun": 10
+      },
+      "nodes": []
+    }
+  },
+  "cases": [
+    {
+      "name": "a plan with no work: every envelope field, and maxParallel written as 1, not 1.0",
+      "request": {},
+      "expect": {
+        "code": "ok",
+        "envelope": {
+          "ok": true,
+          "notRead": [],
+          "warnings": [],
+          "data": {
+            "maxParallel": 1,
+            "units": [],
+            "decided": []
+          }
+        }
+      }
+    },
+    {
+      "name": "a refusal is failed_precondition with its warning as the message and a Failure detail",
+      "request": {
+        "input": {
+          "nodes": [
+            {
+              "id": "rule.example.a"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "code": "failed_precondition",
+        "envelope": {
+          "ok": false,
+          "data": null,
+          "notRead": [],
+          "warnings": [
+            "this example plans no node, and the graph has 1"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a plugin that overruns timeSeconds is deadline_exceeded",
+      "request": {
+        "caps": {
+          "timeSeconds": 1
+        }
+      },
+      "expect": {
+        "code": "deadline_exceeded"
+      }
+    },
+    {
+      "name": "plan without input is invalid_argument",
+      "rawBody": "{\"caps\": {\"timeSeconds\": 60, \"outputBytes\": 1048576}}",
+      "expect": {
+        "code": "invalid_argument",
+        "envelope": {
+          "ok": false,
+          "warnings": [
+            {
+              "$startsWith": "input is required"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "network on Plan is an unknown field: invalid_argument",
+      "request": {
+        "network": {
+          "hosts": [
+            "docs.example.com"
+          ]
+        }
+      },
+      "expect": {
+        "code": "invalid_argument"
+      }
+    }
+  ]
+}
