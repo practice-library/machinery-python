@@ -188,8 +188,9 @@ class Server(unittest.TestCase):
     def test_a_refusal_carries_its_envelope_as_a_failure_detail(self):
         status, _, body = self.plan(lambda i, c: (_ for _ in ()).throw(
             Refusal("unavailable", ["later", "really"], not_read=[("x", "y")])))
+        self.assertEqual(status, 503)
         err = json.loads(body)
-        self.assertEqual((status, err["code"], err["message"]), (503, "unavailable", "later; really"))
+        self.assertEqual((err["code"], err["message"]), ("unavailable", "later; really"))
         [detail] = err["details"]
         self.assertEqual(detail["type"], "machinery.plugin.v1alpha1.Failure")
         self.assertNotIn("debug", detail)
@@ -198,8 +199,20 @@ class Server(unittest.TestCase):
         self.assertEqual(json.loads(failure.to_json()), {"data": None, "notRead": [{"what": "x", "why": "y"}],
                                                          "warnings": ["later", "really"]})
 
+    # the HTTP status Connect answers for each code the runtime uses: a test checks it before it decodes the Failure,
+    # so a runtime that answers a success, or another error, fails on the status and not with KeyError (#15)
+    STATUS = {"invalid_argument": 400, "internal": 500, "unimplemented": 501, "deadline_exceeded": 504}
+
+    def code_of(self, answered, status):
+        """The Connect code of an answer, after its HTTP status is checked, so a runtime that answers a success or
+        another error fails on the status and not with KeyError (#15)."""
+        got, _, body = answered
+        self.assertEqual(got, status)
+        return json.loads(body)["code"]
+
     def failure_of(self, body):
         err = json.loads(body)
+        self.assertIn("details", err, "the error has no Failure detail")
         [detail] = err["details"]
         value = detail["value"]
         env = json.loads(pb.Failure.from_binary(base64.b64decode(value + "=" * (-len(value) % 4))).to_json())
@@ -236,7 +249,8 @@ class Server(unittest.TestCase):
         for key in ("k" * 2000, "\U0001F600" * 600):
             body = json.dumps({"caps": {"timeSeconds": 60, "outputBytes": 1024}, key: 1}).encode()
             with self.subTest(key=key[:3]):
-                _, _, raw = self.post("Describe", body)
+                status, _, raw = self.post("Describe", body)
+                self.assertEqual(status, 400)
                 self.assertLessEqual(len(raw), 1024)
                 err, _ = self.failure_of(raw)
                 self.assertEqual(err["code"], "invalid_argument")
@@ -293,7 +307,8 @@ class Server(unittest.TestCase):
         self.assertEqual(built.call_args.kwargs["cap"], 1024)
 
     def test_a_refusal_whose_not_read_is_not_a_pair_is_internal_with_its_failure(self):
-        _, _, raw = self.plan(lambda i, c: (_ for _ in ()).throw(Refusal("unavailable", ["w"], not_read=[("x",)])))
+        status, _, raw = self.plan(lambda i, c: (_ for _ in ()).throw(Refusal("unavailable", ["w"], not_read=[("x",)])))
+        self.assertEqual(status, 500)
         self.assertEqual(self.failure_of(raw)[0]["code"], "internal")
 
     def test_every_error_the_runtime_answers_carries_a_failure(self):
@@ -306,12 +321,15 @@ class Server(unittest.TestCase):
                  ("Describe", b"", {}, "invalid_argument")]
         for call, body, headers, code in cases:
             with self.subTest(call=call, body=body):
-                _, _, raw = self.post(call, body, headers)
+                status, _, raw = self.post(call, body, headers)
+                self.assertEqual(status, self.STATUS[code])
                 err, env = self.failure_of(raw)
                 self.assertEqual((err["code"], env.get("data", None)), (code, None))
         for answer in ({"not": "an Answer"}, lambda i, c: 1 / 0):
             with self.subTest(answer=answer):
-                self.assertEqual(self.failure_of(self.plan(answer)[2])[0]["code"], "internal")
+                status, _, raw = self.plan(answer)
+                self.assertEqual(status, 500)
+                self.assertEqual(self.failure_of(raw)[0]["code"], "internal")
 
     def test_the_plugin_gets_integral_numbers_as_integers(self):
         self.plugin.answer = Answer({})
@@ -329,14 +347,14 @@ class Server(unittest.TestCase):
                        lambda i, c: (_ for _ in ()).throw(Refusal("unavailable", ["w" * 501])),
                        lambda i, c: (_ for _ in ()).throw(Refusal("unavailable", ["w"], not_read=[("x",)]))):
             with self.subTest(answer=answer):
-                self.assertEqual(json.loads(self.plan(answer)[2])["code"], "internal")
+                self.assertEqual(self.code_of(self.plan(answer), 500), "internal")
         self.assertEqual(self.plan(Answer({}, warnings=["w" * 500], not_read=[("x" * 300, "y" * 300)]))[0], 200)
 
     def test_describe_data_that_is_not_an_object_is_internal(self):
         saved = Plugin.describe
         Plugin.describe = lambda self, caps: Answer(["not", "an", "object"])
         try:
-            self.assertEqual(json.loads(self.post("Describe", {"caps": CAPS})[2])["code"], "internal")
+            self.assertEqual(self.code_of(self.post("Describe", {"caps": CAPS}), 500), "internal")
         finally:
             Plugin.describe = saved
 
@@ -353,9 +371,9 @@ class Server(unittest.TestCase):
         self.assertEqual(len(body), failure.body_size("failed_precondition", err.message, err.details))
 
     def test_an_answer_over_output_bytes_is_resource_exhausted(self):
-        status, _, body = self.plan(Answer({"s": "x" * 2000}), outputBytes=1024)
-        self.assertEqual((status, json.loads(body)["code"]), (429, "resource_exhausted"))
-        self.assertLessEqual(len(body), 1024)
+        answered = self.plan(Answer({"s": "x" * 2000}), outputBytes=1024)
+        self.assertEqual(self.code_of(answered, 429), "resource_exhausted")
+        self.assertLessEqual(len(answered[2]), 1024)
         status, _, body = self.plan(Answer({"s": "x" * 900}), outputBytes=1024)
         self.assertEqual(status, 200)
         self.assertLessEqual(len(body), 1024)
@@ -363,24 +381,22 @@ class Server(unittest.TestCase):
     def test_the_deadline_is_the_sooner_of_time_seconds_and_connect_timeout_ms(self):
         self.plugin.answer = lambda i, c: (time.sleep(3), Answer({}))[1]
         started = time.monotonic()
-        status, _, body = self.post("Plan", {"caps": dict(CAPS, timeSeconds=1), "input": {}})
-        self.assertEqual((status, json.loads(body)["code"]), (504, "deadline_exceeded"))
+        self.assertEqual(self.code_of(self.post("Plan", {"caps": dict(CAPS, timeSeconds=1), "input": {}}), 504),
+                         "deadline_exceeded")
         self.assertLess(time.monotonic() - started, 2.5)
         started = time.monotonic()
-        status, _, body = self.post("Plan", {"caps": CAPS, "input": {}}, {"Connect-Timeout-Ms": "300"})
-        self.assertEqual(json.loads(body)["code"], "deadline_exceeded")
+        self.assertEqual(self.code_of(self.post("Plan", {"caps": CAPS, "input": {}}, {"Connect-Timeout-Ms": "300"}), 504),
+                         "deadline_exceeded")
         self.assertLess(time.monotonic() - started, 1.5)
 
     def test_a_plugin_that_breaks_is_internal_never_a_success(self):
         for answer in ({"not": "an Answer"}, Answer(float("nan")), Answer(object()),
                        lambda i, c: 1 / 0):
             with self.subTest(answer=answer):
-                status, _, body = self.plan(answer)
-                self.assertEqual((status, json.loads(body)["code"]), (500, "internal"))
+                self.assertEqual(self.code_of(self.plan(answer), 500), "internal")
 
     def test_a_call_without_a_method_is_unimplemented(self):
-        status, _, body = self.post("Merge", {"caps": CAPS, "input": {}})
-        self.assertEqual((status, json.loads(body)["code"]), (501, "unimplemented"))
+        self.assertEqual(self.code_of(self.post("Merge", {"caps": CAPS, "input": {}}), 501), "unimplemented")
 
     def test_only_json_is_served(self):
         self.assertEqual(self.post("Describe", b"\x0a\x00", {"Content-Type": "application/proto"})[0], 415)
@@ -396,8 +412,9 @@ class Server(unittest.TestCase):
 
     def test_a_rule_broken_is_invalid_argument_with_the_rule(self):
         status, _, body = self.post("Describe", {"caps": dict(CAPS, outputBytes=1023)})
+        self.assertEqual(status, 400)
         err = json.loads(body)
-        self.assertEqual((status, err["code"]), (400, "invalid_argument"))
+        self.assertEqual(err["code"], "invalid_argument")
         self.assertTrue(err["message"].startswith("caps.outputBytes must be 1024 to 16777216"))
 
 
