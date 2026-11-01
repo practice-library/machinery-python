@@ -264,21 +264,27 @@ class Server(unittest.TestCase):
                 err, _ = self.failure_of(raw)
                 self.assertEqual((status, err["code"]), (400, "invalid_argument"))
 
-    def test_the_largest_integer_a_double_holds_is_accepted(self):
-        # 2**1024 - 2**970 is the midpoint between the largest double and 2**1024: below it a literal rounds to the
-        # largest double, which is finite; from it on it rounds to infinity (#9)
-        edge = 2 ** 1024 - 2 ** 970
+    # 2**1024 - 2**970 is the midpoint between the largest double and 2**1024: below it a literal rounds to the
+    # largest double, which is finite; from it on it rounds to infinity (#9)
+    EDGE = 2 ** 1024 - 2 ** 970
+
+    def plan_with(self, n):
+        return self.post("Plan", b'{"caps": {"timeSeconds": 60, "outputBytes": 1048576}, "input": {"a": %d}}' % n)
+
+    def test_an_integer_that_rounds_to_a_finite_double_is_accepted(self):
         self.assertEqual(codec.strict_load(b'{"a": %d}' % (2 ** 1023)), {"a": 2 ** 1023})
         self.plugin.answer = Answer({})
-        for n in (int(1.7976931348623157e308), edge - 1, -(edge - 1)):
+        for n in (int(1.7976931348623157e308), self.EDGE - 1, -(self.EDGE - 1)):
             with self.subTest(n=n):
-                self.assertEqual(self.post("Plan", b'{"caps": {"timeSeconds": 60, "outputBytes": 1048576}, "input": {"a": %d}}'
-                                           % n)[0], 200)
-        for n in (edge, -edge):
+                self.assertEqual(self.plan_with(n)[0], 200)
+
+    def test_an_integer_that_rounds_to_infinity_is_invalid_argument_with_its_failure(self):
+        self.plugin.answer = Answer({})
+        for n in (self.EDGE, -self.EDGE):
             with self.subTest(n=n):
-                status, _, raw = self.post("Plan", b'{"caps": {"timeSeconds": 60, "outputBytes": 1048576}, "input": {"a": %d}}'
-                                           % n)
-                self.assertEqual((status, self.failure_of(raw)[0]["code"]), (400, "invalid_argument"))
+                status, _, raw = self.plan_with(n)
+                self.assertEqual(status, 400)  # first, so a runtime that lets it through fails on the status
+                self.assertEqual(self.failure_of(raw)[0]["code"], "invalid_argument")
 
     def test_a_decoding_error_is_fitted_to_exactly_the_smallest_legal_output_bytes(self):
         from unittest import mock
