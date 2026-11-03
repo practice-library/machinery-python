@@ -84,13 +84,13 @@ Every error the runtime itself answers (steps 2 to 6) carries a Failure detail.
 2. **Build:** the wheel, from a `pyproject.toml` (proposed). The package is `machinery_runtime`, it needs Python 3.11 or later, and its dependencies match `requirements.txt`. Check its contents: only `machinery_runtime/` and its metadata.
 3. **Installed-wheel smoke and conformance, isolated from the checkout:**
    - Make a clean venv outside the checkout, and install the built wheel plus `requirements.txt` with `--require-hashes`.
-   - Run from an empty temporary directory, with `python -I`, so the checkout cannot be imported.
-   - Assert that `machinery_runtime.__file__` lies under that venv's `site-packages`.
-   - Serve a copy of `examples/minimal.py` from the temporary directory. Its `sys.path` insert then points at the temporary directory, not the checkout.
+   - Copy `examples/minimal.py` to `<temp>/examples/minimal.py`, where `<temp>` is an empty temporary directory outside the checkout. The script inserts its directory's parent into `sys.path`, which is then `<temp>`, and `<temp>` holds no `machinery_runtime`.
+   - From `<temp>`, start it with the venv's `python -I examples/minimal.py`, so neither the checkout nor the current directory can be imported.
+   - In the serving process, assert that `machinery_runtime.__file__` lies under that venv's `site-packages`. A small wrapper does this before calling `serve`, and fails the run otherwise.
    - Run machinery's runtime fixtures from the vendored copy of the named contract tag, after checking it against the pin, over every binding.
 
 **Publication, at the tagged commit**
-1. Repeat steps 2 and 3 above at the exact tagged commit.
+1. Repeat all three pre-tag steps above at the exact tagged commit: the source suite and the mutation guards, the build, and the isolated installed-wheel smoke and conformance.
 2. Only if they pass, attach three assets to the GitHub release: the wheel, `manifest.json`, and the release's `requirements.txt`.
    - The release's `requirements.txt` is the repository's `requirements.txt` plus one line for the wheel itself, hash-pinned: `machinery-runtime @ https://github.com/practice-library/machinery-python/releases/download/v<version>/machinery_runtime-<version>-py3-none-any.whl --hash=sha256:<the manifest's wheel sha256>`.
 3. If they fail, nothing is attached. The tag stays, and the fix ships as the next PATCH.

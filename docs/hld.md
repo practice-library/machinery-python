@@ -39,7 +39,7 @@ There are two releases, and they must not be confused:
 1. **The contract release** is machinery's: `contract/v1alpha1.N` (D8), an archive of `proto/`, `contract/` and `conformance/` with its sha256 (machinery LLD §6.4). The runtime fixtures are in it from `.1`. **A consumer that pins the contract pins this tag and its asset sha256, not a runtime** (machinery LLD §6.6).
 2. **The runtime release** is this repository's: `vMAJOR.MINOR.PATCH`, starting at `v0.1.0`. Each release **names the one contract tag, and that tag's asset sha256, it was qualified against**, and records that in a manifest attached to the release. `v0.1.0` must qualify against `contract/v1alpha1.1` or later, after that tag is published; `.1` is the first tag that carries the runtime fixtures. No contract tag is published yet.
 
-Each release is cut by the practice-library bot only, on public GitHub-hosted runners at no cost. The release PR's head must pass the pre-tag qualification before it merges and is tagged; the same checks then run again at the tagged commit before any asset is published. The LLD gives the steps, the manifest's fields, the compatibility policy, and a recipe for a host adopting this runtime.
+Each release is cut by the practice-library bot only, on public GitHub-hosted runners at no cost. The release PR's head must pass the pre-tag qualification before it merges and is tagged; all of the pre-tag checks (source suite and mutation guards, build, isolated installed-wheel smoke and conformance) then run again at the tagged commit before any asset is published. The LLD gives the steps, the manifest's fields, the compatibility policy, and a recipe for a host adopting this runtime.
 
 ## Known gaps
 
