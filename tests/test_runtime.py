@@ -39,6 +39,17 @@ class Codec(unittest.TestCase):
         self.assertIs(type(codec.integers(2.0 ** 53)), int)
         self.assertIs(type(codec.integers(-(2.0 ** 53))), int)
 
+    def test_integral_numbers_leave_in_integer_form_at_any_size(self):
+        cases = [(3.0, "3"), (-0.0, "0"), (2.0 ** 53, "9007199254740992"), (2.0 ** 53 + 2, "9007199254740994"),
+                 (-(2.0 ** 53 + 2), "-9007199254740994"), (1e20, "100000000000000000000"),
+                 (2.0 ** 60, "1152921504606847000"), (1.7976931348623157e308, "17976931348623157" + "0" * 292),
+                 (2.5, "2.5"), (1e-7, "1e-07")]
+        for value, text in cases:
+            with self.subTest(value=value):
+                msg = pb.PlanResponse.from_json(json.dumps({"ok": True, "data": {"n": value}}))
+                self.assertIn(b'"n":' + text.encode() + b"}", codec.envelope_json(msg))
+                self.assertEqual(float(text), value)
+
     def test_the_envelope_has_every_field_and_integers(self):
         msg = pb.PlanResponse.from_json('{"ok": true, "data": {"n": 3, "x": 0.5}}')
         self.assertEqual(json.loads(codec.envelope_json(msg)),

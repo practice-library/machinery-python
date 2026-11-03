@@ -1,7 +1,8 @@
 """Each guard, removed, must make the runtime's tests fail.
 
-For every row: copy the package and the tests to a temporary directory, replace the guard's code (which must
-occur exactly once, so a row cannot silently stop applying), run tests.test_runtime and expect it to fail.
+First the unchanged copy must pass. Then for every row: copy the package, the tests, the examples and the
+conformance files to a temporary directory, replace the guard's code (which must occur exactly once, so a row cannot
+silently stop applying), run tests.test_runtime and expect it to fail.
 Run: python3 tests/guards.py
 """
 from __future__ import annotations
@@ -29,7 +30,10 @@ GUARDS = [
     ("stdio exits 1 on an error", S, 'return 0 if status == "ok" else 1', "return 0"),
     # (what the guard keeps true, file, code, code without the guard)
     ("integral numbers leave as integers", C, "if isinstance(value, float) and value.is_integer() and abs(value) <= MAX_EXACT:", "if False:"),
-    ("only numbers exact as doubles become integers", C, "abs(value) <= MAX_EXACT", "True"),
+    ("only numbers exact as doubles become integers", C, "if isinstance(value, float) and value.is_integer() and abs(value) <= MAX_EXACT:\n        return int(value)\n    if isinstance(value, list):\n        return [integers(v)", "if isinstance(value, float) and value.is_integer() and True:\n        return int(value)\n    if isinstance(value, list):\n        return [integers(v)"),
+    ("integral numbers above 2^53 leave in integer form", C, "else int(Decimal(repr(value)))", "else value"),
+    ("integral numbers above 2^53 leave as their shortest digits", C, "int(Decimal(repr(value)))", "int(value)"),
+    ("the envelope is written in integer form at any size", C, "json.dumps(integral_form(obj)", "json.dumps(integers(obj)"),
     ("data is always written", C, '    obj.setdefault("data", None)\n', ""),
     ("the decoder is strict JSON", C, "        strict_load(data)\n", ""),
     ("unknown fields are refused", C, "ignore_unknown_fields=False", "ignore_unknown_fields=True"),
@@ -77,12 +81,32 @@ GUARDS = [
 ]
 
 
+COPIED = ("machinery_runtime", "tests", "examples", "conformance")  # the package, the tests, and what a test may serve or read
+
+
+def _copy(tmp: str) -> None:
+    for d in COPIED:
+        shutil.copytree(os.path.join(ROOT, d), os.path.join(tmp, d), ignore=shutil.ignore_patterns("__pycache__"))
+
+
+def _suite(cwd: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, "-m", "unittest", "tests.test_runtime"], cwd=cwd, capture_output=True, text=True)
+
+
 def main() -> int:
+    # The unchanged copy must pass first. If a test comes to read a file the copy leaves out, as a test that runs
+    # examples/minimal.py would, the copy fails on its own and every guard would look tested.
+    with tempfile.TemporaryDirectory() as tmp:
+        _copy(tmp)
+        base = _suite(tmp)
+    if base.returncode != 0:
+        print("FAIL the unchanged copy does not pass tests.test_runtime, so no guard can be judged")
+        print(base.stderr[-2000:])
+        return 1
     failed = []
     for what, path, code, mutant in GUARDS:
         with tempfile.TemporaryDirectory() as tmp:
-            for d in ("machinery_runtime", "tests"):
-                shutil.copytree(os.path.join(ROOT, d), os.path.join(tmp, d), ignore=shutil.ignore_patterns("__pycache__"))
+            _copy(tmp)
             target = os.path.join(tmp, path)
             with open(target, encoding="utf-8") as f:
                 text = f.read()
@@ -91,8 +115,7 @@ def main() -> int:
                 continue
             with open(target, "w", encoding="utf-8") as f:
                 f.write(text.replace(code, mutant))
-            out = subprocess.run([sys.executable, "-m", "unittest", "tests.test_runtime"], cwd=tmp,
-                                 capture_output=True, text=True)
+            out = _suite(tmp)
             if out.returncode == 0:
                 failed.append(f"{what}: tests.test_runtime still passes without the guard")
             else:
