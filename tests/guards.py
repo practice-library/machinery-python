@@ -1,7 +1,7 @@
 """Each guard, removed, must make the runtime's tests fail.
 
-First the unchanged copy must pass. Then for every row: copy the package, the tests, the example and the
-fixtures to a temporary directory, replace the guard's code (which must occur exactly once, so a row cannot
+First the unchanged copy must pass. Then for every row: copy the package, the tests, the examples and the
+conformance files to a temporary directory, replace the guard's code (which must occur exactly once, so a row cannot
 silently stop applying), run tests.test_runtime and expect it to fail.
 Run: python3 tests/guards.py
 """
@@ -71,7 +71,7 @@ GUARDS = [
 ]
 
 
-COPIED = ("machinery_runtime", "tests", "examples", "conformance")  # everything tests.test_runtime reads
+COPIED = ("machinery_runtime", "tests", "examples", "conformance")  # the package, the tests, and what a test may serve or read
 
 
 def _copy(tmp: str) -> None:
@@ -84,8 +84,8 @@ def _suite(cwd: str) -> subprocess.CompletedProcess:
 
 
 def main() -> int:
-    # The unchanged copy must pass first: a copy that fails on its own (a file the tests read and the copy left out)
-    # would make every guard look tested.
+    # The unchanged copy must pass first. If a test comes to read a file the copy leaves out, as a test that runs
+    # examples/minimal.py does, the copy fails on its own and every guard would look tested.
     with tempfile.TemporaryDirectory() as tmp:
         _copy(tmp)
         base = _suite(tmp)
