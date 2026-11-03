@@ -1,7 +1,8 @@
 """Each guard, removed, must make the runtime's tests fail.
 
-For every row: copy the package and the tests to a temporary directory, replace the guard's code (which must
-occur exactly once, so a row cannot silently stop applying), run tests.test_runtime and expect it to fail.
+First the unchanged copy must pass. Then for every row: copy the package, the tests, the example and the
+fixtures to a temporary directory, replace the guard's code (which must occur exactly once, so a row cannot
+silently stop applying), run tests.test_runtime and expect it to fail.
 Run: python3 tests/guards.py
 """
 from __future__ import annotations
@@ -70,12 +71,32 @@ GUARDS = [
 ]
 
 
+COPIED = ("machinery_runtime", "tests", "examples", "conformance")  # everything tests.test_runtime reads
+
+
+def _copy(tmp: str) -> None:
+    for d in COPIED:
+        shutil.copytree(os.path.join(ROOT, d), os.path.join(tmp, d), ignore=shutil.ignore_patterns("__pycache__"))
+
+
+def _suite(cwd: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, "-m", "unittest", "tests.test_runtime"], cwd=cwd, capture_output=True, text=True)
+
+
 def main() -> int:
+    # The unchanged copy must pass first: a copy that fails on its own (a file the tests read and the copy left out)
+    # would make every guard look tested.
+    with tempfile.TemporaryDirectory() as tmp:
+        _copy(tmp)
+        base = _suite(tmp)
+    if base.returncode != 0:
+        print("FAIL the unchanged copy does not pass tests.test_runtime, so no guard can be judged")
+        print(base.stderr[-2000:])
+        return 1
     failed = []
     for what, path, code, mutant in GUARDS:
         with tempfile.TemporaryDirectory() as tmp:
-            for d in ("machinery_runtime", "tests"):
-                shutil.copytree(os.path.join(ROOT, d), os.path.join(tmp, d), ignore=shutil.ignore_patterns("__pycache__"))
+            _copy(tmp)
             target = os.path.join(tmp, path)
             with open(target, encoding="utf-8") as f:
                 text = f.read()
@@ -84,8 +105,7 @@ def main() -> int:
                 continue
             with open(target, "w", encoding="utf-8") as f:
                 f.write(text.replace(code, mutant))
-            out = subprocess.run([sys.executable, "-m", "unittest", "tests.test_runtime"], cwd=tmp,
-                                 capture_output=True, text=True)
+            out = _suite(tmp)
             if out.returncode == 0:
                 failed.append(f"{what}: tests.test_runtime still passes without the guard")
             else:
