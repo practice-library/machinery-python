@@ -10,6 +10,7 @@ Connect runner can check its answers, but it refreshes nothing. Each call shows 
   Run       not a method here: the runtime answers unimplemented.
 
   python3 examples/minimal.py [--port 0]   # prints its base URL first
+  python3 examples/minimal.py --stdio      # answers the one call on stdin (the stdio binding)
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from machinery_runtime import Answer, Refusal, serve  # noqa: E402
+from machinery_runtime import Answer, Refusal, serve, serve_stdio  # noqa: E402
 
 SCHEMAS = "https://github.com/practice-library/machinery/contract/v1alpha1/fact-refresh.schema.json#/$defs/"
 REPORT = "https://github.com/practice-library/.github/spec/refresh-report/schema.json"
@@ -53,7 +54,11 @@ class Minimal:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--port", type=int, default=0)
-    serve(Minimal(), ap.parse_args(argv).port)
+    ap.add_argument("--stdio", action="store_true", help="answer the one call on stdin instead of serving")
+    args = ap.parse_args(argv)
+    if args.stdio:
+        return serve_stdio(Minimal())
+    serve(Minimal(), args.port)
     return 0
 
 

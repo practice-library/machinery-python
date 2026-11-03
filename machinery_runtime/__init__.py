@@ -10,8 +10,10 @@ A plugin is any object with some of these methods; the runtime answers unimpleme
 
 input is the call's input as plain JSON values; caps is {"timeSeconds", "outputBytes"}; network is
 {"hosts": [...]} or {"hosts": [], "replay": {"start", "exchanges"}}, with the defaults filled in. A method
-fails by raising Refusal(code, warnings, not_read). serve(plugin) serves it on 127.0.0.1.
+fails by raising Refusal(code, warnings, not_read). serve(plugin) serves it on 127.0.0.1; serve_stdio(plugin)
+answers one call on stdin and stdout (the stdio binding).
 """
 from .server import Answer, Refusal, application, serve
+from .stdio import serve_stdio
 
-__all__ = ["Answer", "Refusal", "application", "serve"]
+__all__ = ["Answer", "Refusal", "application", "serve", "serve_stdio"]

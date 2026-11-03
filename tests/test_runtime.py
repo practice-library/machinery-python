@@ -4,7 +4,11 @@ reach or name."""
 from __future__ import annotations
 
 import base64
+import io
 import json
+import os
+import subprocess
+import sys
 import threading
 import time
 import unittest
@@ -15,7 +19,7 @@ from connectrpc.code import Code
 from connectrpc.errors import ConnectError
 from machinery.plugin.v1alpha1 import plugin_pb as pb
 
-from machinery_runtime import Answer, Refusal, codec, failure, rules, server
+from machinery_runtime import Answer, Refusal, codec, failure, rules, server, stdio
 
 SVC = "/machinery.plugin.v1alpha1.PluginService/"
 CAPS = {"timeSeconds": 60, "outputBytes": 1048576}
@@ -416,6 +420,127 @@ class Server(unittest.TestCase):
         err = json.loads(body)
         self.assertEqual(err["code"], "invalid_argument")
         self.assertTrue(err["message"].startswith("caps.outputBytes must be 1024 to 16777216"))
+
+
+class Stdio(unittest.TestCase):
+    """The stdio binding answers exactly what the loopback binding answers, through the same application."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.plugin = Plugin()
+        cls.server = server._Server(("127.0.0.1", 0), server._Quiet)
+        cls.server.set_app(server.application(cls.plugin))
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.url = f"http://127.0.0.1:{cls.server.server_address[1]}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def over_stdio(self, call, body, timeout_ms=60000, frame=None):
+        data = body if isinstance(body, bytes) else json.dumps(body).encode()
+        line = frame if frame is not None else json.dumps({"path": SVC + call, "timeoutMs": timeout_ms}).encode()
+        out = io.BytesIO()
+        code = stdio.serve_stdio(self.plugin, io.BytesIO(line + b"\n" + data), out)
+        status_line, _, answer = out.getvalue().partition(b"\n")
+        return code, json.loads(status_line), answer
+
+    def over_http(self, call, body):
+        data = body if isinstance(body, bytes) else json.dumps(body).encode()
+        req = urllib.request.Request(self.url + SVC + call, data=data, method="POST",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, e.read()
+
+    def test_every_outcome_is_the_loopback_answer_with_its_code_as_the_status(self):
+        cases = [("Describe", {"caps": CAPS}, None),
+                 ("Plan", {"caps": CAPS, "input": {"k": 1}}, Answer({"n": 2 ** 53 + 2.0, "x": 0.5}, warnings=["w"])),
+                 ("Plan", {"caps": CAPS, "input": {"k": 1}},
+                  lambda i, c: (_ for _ in ()).throw(Refusal("unavailable", ["later"], not_read=[("x", "y")]))),
+                 ("Plan", {"caps": CAPS, "input": {"k": 1}}, lambda i, c: 1 / 0),
+                 ("Plan", {"caps": dict(CAPS, outputBytes=1024), "input": {"k": 1}}, Answer({"p": "x" * 2000})),
+                 ("Plan", {"caps": CAPS}, None),
+                 ("Merge", {"caps": CAPS, "input": {}}, None),
+                 ("Describe", b'{"caps": {"timeSeconds": 60, "outputBytes": 1048576}, "x": 1}', None)]
+        for call, body, answer in cases:
+            with self.subTest(call=call, body=body):
+                self.plugin.answer = answer
+                http_status, http_body = self.over_http(call, body)
+                code, status, answer_body = self.over_stdio(call, body)
+                self.assertEqual(answer_body, http_body)
+                if http_status == 200:
+                    self.assertEqual((code, status), (0, {"status": "ok"}))
+                else:
+                    self.assertEqual((code, status), (1, {"status": json.loads(http_body)["code"]}))
+
+    def test_timeout_ms_is_the_calls_deadline(self):
+        self.plugin.answer = lambda i, c: (time.sleep(3), Answer({}))[1]
+        started = time.monotonic()
+        code, status, body = self.over_stdio("Plan", {"caps": CAPS, "input": {}}, timeout_ms=300)
+        self.assertEqual((code, status), (1, {"status": "deadline_exceeded"}))
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertIn("details", json.loads(body))
+
+    def test_a_frame_that_cannot_be_read_is_invalid_argument_without_a_failure(self):
+        good = {"path": SVC + "Describe", "timeoutMs": 1000}
+        for frame in (b"not json", b"[]", json.dumps(dict(good, extra=1)).encode(), json.dumps({"path": SVC}).encode(),
+                      json.dumps(dict(good, path="Describe")).encode(), json.dumps(dict(good, path=1)).encode(),
+                      json.dumps(dict(good, timeoutMs=0)).encode(), json.dumps(dict(good, timeoutMs=True)).encode(),
+                      json.dumps(dict(good, timeoutMs="5")).encode(), json.dumps(dict(good, timeoutMs=1.5)).encode(),
+                      json.dumps(dict(good, timeoutMs=10 ** 10)).encode(), b'{"path": "/a", "path": "/b", "timeoutMs": 1}'):
+            with self.subTest(frame=frame):
+                code, status, body = self.over_stdio("Describe", {"caps": CAPS}, frame=frame)
+                self.assertEqual((code, status), (1, {"status": "invalid_argument"}))
+                err = json.loads(body)
+                self.assertEqual(err["code"], "invalid_argument")
+                self.assertNotIn("details", err)
+
+    def test_stdin_without_a_frame_line_is_invalid_argument(self):
+        out = io.BytesIO()
+        frame = json.dumps({"path": SVC + "Describe", "timeoutMs": 1000}).encode()  # a good frame, but no newline
+        self.assertEqual(stdio.serve_stdio(self.plugin, io.BytesIO(frame), out), 1)
+        status_line, _, body = out.getvalue().partition(b"\n")
+        self.assertEqual(json.loads(status_line), {"status": "invalid_argument"})
+        self.assertEqual(json.loads(body), {"code": "invalid_argument", "message": "stdin has no frame line"})
+
+    def test_a_path_not_served_is_unimplemented(self):
+        code, status, body = self.over_stdio("Nope", {"caps": CAPS})
+        self.assertEqual((code, status), (1, {"status": "unimplemented"}))
+        self.assertEqual(json.loads(body)["code"], "unimplemented")
+
+
+class StdioProcess(unittest.TestCase):
+    """The example over the stdio binding, as a host runs it: one process per call."""
+    EXAMPLE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "examples", "minimal.py")
+
+    def run_call(self, call, body, timeout_ms=60000):
+        frame = json.dumps({"path": SVC + call, "timeoutMs": timeout_ms}).encode()
+        done = subprocess.run([sys.executable, "-I", self.EXAMPLE, "--stdio"], input=frame + b"\n" + json.dumps(body).encode(),
+                              capture_output=True, timeout=20)
+        status_line, _, answer = done.stdout.partition(b"\n")
+        return done.returncode, json.loads(status_line), answer
+
+    def test_describe_exits_0_and_run_exits_1(self):
+        code, status, body = self.run_call("Describe", {"caps": CAPS})
+        self.assertEqual((code, status), (0, {"status": "ok"}))
+        self.assertEqual(json.loads(body)["data"]["name"], "minimal")
+        self.assertEqual(self.run_call("Run", {"caps": CAPS, "input": {}, "network": {}})[:2],
+                         (1, {"status": "unimplemented"}))
+
+    def test_a_late_plugin_ends_with_the_process(self):
+        # the example's plan sleeps 5 s when timeSeconds is 1: the answer comes at the deadline, and the process
+        # exits then, not when the plugin's thread would have finished (ruling D4)
+        body = {"caps": {"timeSeconds": 1, "outputBytes": 1048576},
+                "input": {"graph": "g", "commit": "c", "run": "r", "now": "2026-11-04T00:00:00Z", "nodes": []}}
+        started = time.monotonic()
+        code, status, _ = self.run_call("Plan", body)
+        self.assertEqual((code, status), (1, {"status": "deadline_exceeded"}))
+        self.assertLess(time.monotonic() - started, 4)
 
 
 class Bind(unittest.TestCase):
