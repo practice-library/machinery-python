@@ -85,7 +85,7 @@ def _suite(cwd: str) -> subprocess.CompletedProcess:
 
 def main() -> int:
     # The unchanged copy must pass first. If a test comes to read a file the copy leaves out, as a test that runs
-    # examples/minimal.py does, the copy fails on its own and every guard would look tested.
+    # examples/minimal.py would, the copy fails on its own and every guard would look tested.
     with tempfile.TemporaryDirectory() as tmp:
         _copy(tmp)
         base = _suite(tmp)
