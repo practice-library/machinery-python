@@ -509,6 +509,7 @@ class Stdio(unittest.TestCase):
                 self.assertEqual((code, status), (1, {"status": "invalid_argument"}))
                 err = json.loads(body)
                 self.assertEqual(err["code"], "invalid_argument")
+                self.assertTrue(err["message"].startswith("the frame"), err["message"])  # refused for the frame itself
                 self.assertNotIn("details", err)
 
     def test_stdin_without_a_frame_line_is_invalid_argument(self):
