@@ -6,12 +6,15 @@ leniency stays, as the contract allows: proto field names (time_seconds), intege
 null for a message, list or map field, which is read as left out.
 
 Encoding writes every envelope field, so ok, data, notRead and warnings are always present (data is null
-when the call gives none). A number in data whose value is integral is written as an integer (3, never
-3.0): Struct and Value hold doubles, and protobuf-py 0.7.0 writes them with a fraction.
+when the call gives none). A number in data whose value is integral is written in integer form at any size
+(3, never 3.0; 1e20 as 100000000000000000000): Struct and Value hold doubles, protobuf-py 0.7.0 writes them
+with a fraction, and json writes a large one with an exponent. Above 2^53 the digits are the double's
+shortest round-trip digits followed by zeros, as Go's strconv writes them, so both runtimes agree.
 """
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from typing import Any
 
 from protobuf import Message
@@ -59,6 +62,19 @@ def integers(value: Any) -> Any:
     return value
 
 
+def integral_form(value: Any) -> Any:
+    """value as it is written: every integral float, at any size, in integer form. Up to 2^53 that is the
+    exact integer; above it, the shortest digits that read back as the same double, then zeros (2.0 ** 60 is
+    1152921504606847000, not 1152921504606846976). Only for output: a plugin's input keeps integers()."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value) if abs(value) <= MAX_EXACT else int(Decimal(repr(value)))
+    if isinstance(value, list):
+        return [integral_form(v) for v in value]
+    if isinstance(value, dict):
+        return {k: integral_form(v) for k, v in value.items()}
+    return value
+
+
 def envelope_json(message: Message) -> bytes:
     """A response message as the contract writes it: every envelope field, integral numbers as integers."""
     obj = json.loads(message.to_json(always_emit_implicit=True))
@@ -66,7 +82,7 @@ def envelope_json(message: Message) -> bytes:
     missing = [f for f in ENVELOPE_FIELDS if f not in obj]
     if missing:
         raise ValueError(f"{type(message).__name__} is not an envelope: no {missing[0]}")
-    return json.dumps(integers(obj), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return json.dumps(integral_form(obj), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
 class StrictJSONCodec:
