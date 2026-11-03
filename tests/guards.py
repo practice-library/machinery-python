@@ -19,7 +19,10 @@ F = "machinery_runtime/failure.py"
 GUARDS = [
     # (what the guard keeps true, file, code, code without the guard)
     ("integral numbers leave as integers", C, "if isinstance(value, float) and value.is_integer() and abs(value) <= MAX_EXACT:", "if False:"),
-    ("only numbers exact as doubles become integers", C, "abs(value) <= MAX_EXACT", "True"),
+    ("only numbers exact as doubles become integers", C, "if isinstance(value, float) and value.is_integer() and abs(value) <= MAX_EXACT:\n        return int(value)\n    if isinstance(value, list):\n        return [integers(v)", "if isinstance(value, float) and value.is_integer() and True:\n        return int(value)\n    if isinstance(value, list):\n        return [integers(v)"),
+    ("integral numbers above 2^53 leave in integer form", C, "else int(Decimal(repr(value)))", "else value"),
+    ("integral numbers above 2^53 leave as their shortest digits", C, "int(Decimal(repr(value)))", "int(value)"),
+    ("the envelope is written in integer form at any size", C, "json.dumps(integral_form(obj)", "json.dumps(integers(obj)"),
     ("data is always written", C, '    obj.setdefault("data", None)\n', ""),
     ("the decoder is strict JSON", C, "        strict_load(data)\n", ""),
     ("unknown fields are refused", C, "ignore_unknown_fields=False", "ignore_unknown_fields=True"),
