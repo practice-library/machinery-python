@@ -6,7 +6,7 @@ Rulings made at signing, which this document follows:
 - **D1:** the transport is stdio, and loopback HTTP stays as the reference binding.
 - **D4:** a runtime must answer on time and may abandon a late plugin; the host ends the process.
 - **D5:** Python is a machinery runtime for networked jobs, with hash-pinned dependencies.
-- **D8 (machinery):** the contract is released under its own tag, `contract/v1alpha1.N`. The first is `contract/v1alpha1.0` at machinery `65b3d2ce34c67c7887a2564b3f694239aebb642d` (asset `machinery-contract-v1alpha1.0.tar`, sha256 `f9c513a94e735ec850f1ba09d8a13f919342b34c2e4aad1c8eaa4a774cffad4f`).
+- **D8 (machinery):** the contract is released under its own tag, `contract/v1alpha1.N`. The planned first tag is `contract/v1alpha1.0` at machinery `65b3d2ce34c67c7887a2564b3f694239aebb642d` (asset `machinery-contract-v1alpha1.0.tar`, sha256 `f9c513a94e735ec850f1ba09d8a13f919342b34c2e4aad1c8eaa4a774cffad4f`).
 - **D9 (machinery):** the runtime languages are Go and Python, with no new repository.
 
 ## Purpose
@@ -37,9 +37,9 @@ It exists because of two machinery decisions. machinery#6 made machinery a contr
 
 There are two releases, and they must not be confused:
 1. **The contract release** is machinery's: `contract/v1alpha1.N` (D8), an archive of `proto/`, `contract/` and `conformance/` with its sha256 (machinery LLD §6.4). The runtime fixtures are in it from `.1`. **A consumer that pins the contract pins this tag and its asset sha256, not a runtime** (machinery LLD §6.6).
-2. **The runtime release** is this repository's: `vMAJOR.MINOR.PATCH`, starting at `v0.1.0`. Each release **names the one contract tag, and that tag's asset sha256, it was qualified against**, and records that in a manifest attached to the release. `v0.1.0` qualifies against `contract/v1alpha1.1` or later, the first tag that carries the runtime fixtures.
+2. **The runtime release** is this repository's: `vMAJOR.MINOR.PATCH`, starting at `v0.1.0`. Each release **names the one contract tag, and that tag's asset sha256, it was qualified against**, and records that in a manifest attached to the release. `v0.1.0` must qualify against `contract/v1alpha1.1` or later, after that tag is published; `.1` is the first tag that carries the runtime fixtures. No contract tag is published yet.
 
-Each release is cut by the practice-library bot only, after a release PR passes qualification at the exact tagged commit, on public GitHub-hosted runners at no cost. The LLD gives the steps, the manifest's fields, the compatibility policy, and a recipe for a host adopting this runtime.
+Each release is cut by the practice-library bot only, on public GitHub-hosted runners at no cost. The release PR's head must pass the pre-tag qualification before it merges and is tagged; the same checks then run again at the tagged commit before any asset is published. The LLD gives the steps, the manifest's fields, the compatibility policy, and a recipe for a host adopting this runtime.
 
 ## Known gaps
 
@@ -50,6 +50,7 @@ Each release is cut by the practice-library bot only, after a release PR passes 
 5. **No release, and no tag trigger in CI.**
 6. **Fixture pin lag.** CI runs machinery's runner at the bare commit `d6024652`. The family pins three different machinery commits today. D8 resolves this: this repository moves to a contract tag plus asset sha256.
 7. **No real plugin yet.**
+8. **Integral numbers above 2^53.** The contract writes every integral number in integer form, at any size. This runtime does so only up to 2^53, so `2^53 + 2` leaves as `9007199254740994.0` and `1e20` as `1e+20`. machinery-go writes the shortest round-trip digits in integer form (`9007199254740994`, `100000000000000000000`). A fix PR aligns this runtime with machinery-go.
 
 ## Issues studied
 
@@ -60,7 +61,7 @@ Each release is cut by the practice-library bot only, after a release PR passes 
 
 ## Dry run: a vendor's CLI (paper only)
 
-This walks one change through the chain in the founder's addendum. The worked example is a vendor's CLI whose graph holds 126 nodes sourced at the upstream release commit `1c6ac8c3` (graphs#68). A new upstream release changes a fact, such as a worktree state or a destructive-flag marker.
+This walks one change through the chain in the founder's addendum. The worked example is a vendor's CLI whose graph holds 126 nodes sourced at the upstream release commit `1c6ac8c3c4d2c3dec2cb5966d225ca2a0e0471d3`. The upstream repository, its release tag and the 28 source URLs are named in graphs#68 (public). The repository's name is on the organisation's denylist, so it is not repeated here. A new upstream release changes a fact, such as a worktree state or a destructive-flag marker.
 
 | Step | Who | What machinery-python does | What it imports from graphs | What is missing |
 |---|---|---|---|---|

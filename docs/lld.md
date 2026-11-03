@@ -8,7 +8,7 @@ Status: the founder signed an earlier draft on 2026-11-02. This revision answers
 |---|---|---|
 | `machinery_runtime/__init__.py` | 17 | Public surface: `Answer`, `Refusal`, `serve` |
 | `machinery_runtime/server.py` | 197 | The Connect service, the call pipeline, the deadline (`_within`), the output cap, and the threaded `wsgiref` server on 127.0.0.1 |
-| `machinery_runtime/codec.py` | 90 | Strict JSON decoding, and integral numbers written as integers up to 2^53 |
+| `machinery_runtime/codec.py` | 90 | Strict JSON decoding, and integral numbers written as integers up to 2^53 (above 2^53: HLD gap 8) |
 | `machinery_runtime/rules.py` | 80 | The rules proto cannot state |
 | `machinery_runtime/failure.py` | 75 | The code mapping, the `Failure` detail, and shrinking an error to fit outputBytes |
 | `examples/minimal.py` | 61 | The conformance plugin. Each call shows one outcome |
@@ -77,15 +77,23 @@ Every error the runtime itself answers (steps 2 to 6) carries a Failure detail.
 - The delivery model is the organisation's, as machinery's LLD §6 sets out:
   1. A branch `release/<version>` takes the child PRs, each reviewed at its exact head.
   2. One release PR from that branch to `main`, authored by the bot. Its body carries the self-check, the qualification result and the review receipts.
-  3. After it merges, the bot tags `v<version>` on the merge commit.
+  3. The release PR merges only when its head passes the pre-tag qualification below. After it merges, the bot tags `v<version>` on the merge commit.
 
-**Qualification, on the tag, at the exact tagged commit, on public GitHub-hosted runners only ($0)**
-1. Build the wheel from a `pyproject.toml` (proposed). The package is `machinery_runtime`, it needs Python 3.11 or later, and its dependencies match `requirements.txt`.
-2. Check its contents: only `machinery_runtime/` and its metadata.
-3. Install it into a clean venv, with `--require-hashes`, from the built file.
-4. Run the unit suite and the guards against the **installed** package.
-5. Run machinery's runtime fixtures from the vendored copy of the named contract tag, after checking it against the pin, over every binding.
-6. Only if every step passes, attach the wheel and the manifest to the GitHub release.
+**Pre-tag qualification, at the release PR's exact head, on public GitHub-hosted runners only ($0)**
+1. **Source checks:** the unit suite and the mutation guards (`tests/guards.py`) on the checkout. The guards mutate copies of the checkout's sources by design, so they test the source, not the wheel.
+2. **Build:** the wheel, from a `pyproject.toml` (proposed). The package is `machinery_runtime`, it needs Python 3.11 or later, and its dependencies match `requirements.txt`. Check its contents: only `machinery_runtime/` and its metadata.
+3. **Installed-wheel smoke and conformance, isolated from the checkout:**
+   - Make a clean venv outside the checkout, and install the built wheel plus `requirements.txt` with `--require-hashes`.
+   - Run from an empty temporary directory, with `python -I`, so the checkout cannot be imported.
+   - Assert that `machinery_runtime.__file__` lies under that venv's `site-packages`.
+   - Serve a copy of `examples/minimal.py` from the temporary directory. Its `sys.path` insert then points at the temporary directory, not the checkout.
+   - Run machinery's runtime fixtures from the vendored copy of the named contract tag, after checking it against the pin, over every binding.
+
+**Publication, at the tagged commit**
+1. Repeat steps 2 and 3 above at the exact tagged commit.
+2. Only if they pass, attach three assets to the GitHub release: the wheel, `manifest.json`, and the release's `requirements.txt`.
+   - The release's `requirements.txt` is the repository's `requirements.txt` plus one line for the wheel itself, hash-pinned: `machinery-runtime @ https://github.com/practice-library/machinery-python/releases/download/v<version>/machinery_runtime-<version>-py3-none-any.whl --hash=sha256:<the manifest's wheel sha256>`.
+3. If they fail, nothing is attached. The tag stays, and the fix ships as the next PATCH.
 
 **The manifest** (`manifest.json`, a release asset) records:
 - the runtime's version, tag and commit;
@@ -99,10 +107,10 @@ Every error the runtime itself answers (steps 2 to 6) carries a Failure detail.
 **A consumer that pins the contract** follows machinery's release, not this one. It replaces its commit pin with machinery's four-value pin (tag, commit, asset, sha256), starting at `contract/v1alpha1.0`, and changes any test that hard-codes the commit to read the pin file. machinery LLD §6.6 owns those steps.
 
 **A host adopting this runtime** (to launch Python plugins)
-1. Download `manifest.json` and the wheel from the release.
+1. Download `manifest.json`, the wheel and the release's `requirements.txt` from the release.
 2. Check the wheel's sha256 against the manifest.
 3. Check that the manifest's contract pin (tag and asset sha256) is the one the host pins.
-4. Install with `pip install --require-hashes --only-binary :all:`, using the release's `requirements.txt`.
+4. Install with `pip install --require-hashes --only-binary :all: -r requirements.txt`, using the release's file. Its last line pins the wheel by URL and sha256, so the runtime itself is hash-checked like every dependency.
 5. Launch plugins through the binding the host speaks: `stdio` for a host that may not open TCP.
 6. When the host pins a new runtime release, repeat steps 1 to 3. A MINOR change in 0.x is read as possibly breaking.
 
@@ -112,7 +120,7 @@ The language choice is machinery's, ruled as D9: Go and Python, with no new repo
 1. Serve the five calls in Connect unary JSON over each binding it offers, answering `unimplemented`, with a Failure, for a missing method.
 2. Decode strictly: UTF-8, no duplicate keys, no NaN or Infinity, no lone surrogates, no unknown fields. It must still accept proto field names, integers as strings, and null for an omitted field.
 3. Apply the rules proto cannot state, with the same warning wording (the fixtures compare warnings).
-4. Write integral `Struct`/`Value` numbers as integers up to 2^53 (machinery#29).
+4. Write every integral `Struct`/`Value` number in integer form, at any size: the shortest round-trip digits, with no fraction or exponent (`3`, `9007199254740994`, `100000000000000000000`). This is machinery#29, and machinery-go's rule; this runtime's gap above 2^53 is HLD gap 8.
 5. Put a Failure detail on every error the runtime itself answers, and shrink it to fit outputBytes in the same order. Transport-level answers carry none.
 6. Answer on time: the deadline is the sooner of `timeSeconds` and the call's timeout, and the runtime may abandon the plugin (D4). Measure the output cap on uncompressed bytes, and never compress.
 
@@ -127,5 +135,5 @@ The language choice is machinery's, ruled as D9: Go and Python, with no new repo
 What this repository would add for the worked example, after D1's binding exists in machinery:
 1. **A new `machinery_runtime/stdio.py`** speaking machinery's frame through the same codec, rules, call and failure pipeline. The deadline is enforced in-process (D4), and the host also ends the process. A guard row would cover it: dropping the status line must fail a test.
 2. **The adapter.** It maps fact-refresh's verbs onto `machinery_runtime`, with v0 exit codes mapped to Connect codes: 1 to `failed_precondition`, 2 to `invalid_argument`, 3 to `unimplemented`, 75 to `unavailable`. It lives in machinery while machinery D7 holds.
-3. **A replay fixture** shaped like the vendor's CLI: `network: {"hosts": [], "replay": ...}` recording the upstream hosts' answers at commit `1c6ac8c3`. It proves replay passes through the runtime unchanged.
+3. **A replay fixture** shaped like the vendor's CLI: `network: {"hosts": [], "replay": ...}` recording the upstream hosts' answers at commit `1c6ac8c3c4d2c3dec2cb5966d225ca2a0e0471d3` (the source reference is graphs#68). It proves replay passes through the runtime unchanged.
 4. **Imports from graphs:** none at runtime. A test may copy one node of the vendor's graph as input, pinned by graphs commit and sha256, once graphs#68 lands.
