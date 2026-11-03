@@ -16,8 +16,18 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 R, C, V = "machinery_runtime/rules.py", "machinery_runtime/codec.py", "machinery_runtime/server.py"
 F = "machinery_runtime/failure.py"
+S = "machinery_runtime/stdio.py"
 
 GUARDS = [
+    ("stdio needs a frame line", S, "    if not sep:\n        return", "    if False:\n        return"),
+    ("stdio's frame has exactly path and timeoutMs", S, "set(frame) != FRAME_KEYS", "not FRAME_KEYS <= set(frame)"),
+    ("stdio's path starts with /", S, 'or not path.startswith("/")', ""),
+    ("stdio's timeoutMs is not a bool", S, "if isinstance(timeout, bool) or not", "if not"),
+    ("stdio's timeoutMs is at least 1", S, "not 1 <= timeout < MAX_TIMEOUT_MS", "not 0 <= timeout < MAX_TIMEOUT_MS"),
+    ("stdio's timeoutMs is the call's deadline", S, '"HTTP_CONNECT_TIMEOUT_MS": str(timeout), ', ""),
+    ("stdio writes a Connect error's own code", S, "            return code, out\n", "            pass\n"),
+    ("stdio maps a bare 404 to unimplemented", S, "404: \"unimplemented\"", "404: \"not_found\""),
+    ("stdio exits 1 on an error", S, 'return 0 if status == "ok" else 1', "return 0"),
     # (what the guard keeps true, file, code, code without the guard)
     ("integral numbers leave as integers", C, "if isinstance(value, float) and value.is_integer() and abs(value) <= MAX_EXACT:", "if False:"),
     ("only numbers exact as doubles become integers", C, "if isinstance(value, float) and value.is_integer() and abs(value) <= MAX_EXACT:\n        return int(value)\n    if isinstance(value, list):\n        return [integers(v)", "if isinstance(value, float) and value.is_integer() and True:\n        return int(value)\n    if isinstance(value, list):\n        return [integers(v)"),
